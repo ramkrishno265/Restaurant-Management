@@ -1,0 +1,95 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// ১. রেস্তোরাঁর টেবিল
+model Table {
+  id              Int              @id @default(autoincrement())
+  tableNumber     String           @unique
+  qrCodeUrl       String?
+  orders          Order[]
+  serviceRequests ServiceRequest[]
+  createdAt       DateTime         @default(now())
+}
+
+// ২. মেনু ক্যাটাগরি (যেমন: Drinks, Appetizers, Main Course)
+model Category {
+  id        Int        @id @default(autoincrement())
+  name      String
+  menuItems MenuItem[]
+  createdAt DateTime   @default(now())
+}
+
+// ৩. খাবার/আইটেম
+model MenuItem {
+  id          Int         @id @default(autoincrement())
+  categoryId  Int
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  name        String
+  description String?
+  price       Decimal     @db.Decimal(10, 2)
+  imageUrl    String?
+  isAvailable Boolean     @default(true)
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
+}
+
+// ৪. অর্ডার
+model Order {
+  id             Int         @id @default(autoincrement())
+  tableId        Int
+  table          Table       @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  status         OrderStatus @default(PENDING)
+  specialRequest String?
+  totalAmount    Decimal     @db.Decimal(10, 2)
+  orderItems     OrderItem[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+}
+
+// অর্ডারের স্ট্যাটাস
+enum OrderStatus {
+  PENDING
+  COOKING
+  READY
+  SERVED
+  CANCELLED
+}
+
+// ৫. অর্ডারের ভেতরের আইটেমসমূহ
+model OrderItem {
+  id         Int      @id @default(autoincrement())
+  orderId    Int
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItemId Int
+  menuItem   MenuItem @relation(fields: [menuItemId], references: [id])
+  quantity   Int
+  unitPrice  Decimal  @db.Decimal(10, 2)
+}
+
+// ৬. সার্ভিস রিকোয়েস্ট (ওয়েটার ডাকা/পানি/বিল)
+model ServiceRequest {
+  id        Int           @id @default(autoincrement())
+  tableId   Int
+  table     Table         @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  type      RequestType
+  status    RequestStatus @default(PENDING)
+  createdAt DateTime      @default(now())
+}
+
+enum RequestType {
+  CALL_WAITER
+  WATER
+  BILL
+  OTHER
+}
+
+enum RequestStatus {
+  PENDING
+  RESOLVED
+}
