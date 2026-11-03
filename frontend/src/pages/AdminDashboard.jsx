@@ -1,126 +1,108 @@
 import React, { useEffect, useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useSocket } from '../context/SocketContext';
 import API from '../services/api';
-import { LayoutDashboard, Bell, Check } from 'lucide-react';
+import Sidebar from '../components/Sidebar';
+import { Clock, DollarSign, Utensils } from 'lucide-react';
 
 const AdminDashboard = () => {
   const socket = useSocket();
+  const location = useLocation();
   const [orders, setOrders] = useState([]);
+  const [menuItems, setMenuItems] = useState([]);
   const [serviceRequests, setServiceRequests] = useState([]);
 
   useEffect(() => {
-    // 1. Fetch Active Orders
-    API.get('/orders')
-      .then((res) => setOrders(res.data))
-      .catch((err) => console.error(err));
+    API.get('/orders').then((res) => setOrders(res.data)).catch(console.error);
+    API.get('/menu').then((res) => {
+      const allItems = res.data.flatMap((cat) => cat.menuItems || []);
+      setMenuItems(allItems);
+    }).catch(console.error);
 
-    // 2. Join Admin Room
     if (socket) {
       socket.emit('join_dashboard', 'admin');
-
-      socket.on('new_order', (newOrder) => {
-        setOrders((prev) => [newOrder, ...prev]);
-      });
-
+      socket.on('new_order', (newOrder) => setOrders((prev) => [newOrder, ...prev]));
       socket.on('order_status_updated', (updatedOrder) => {
-        setOrders((prev) =>
-          prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o))
-        );
+        setOrders((prev) => prev.map((o) => (o.id === updatedOrder.id ? updatedOrder : o)));
       });
-
-      socket.on('new_service_request', (req) => {
-        setServiceRequests((prev) => [req, ...prev]);
-      });
+      socket.on('new_service_request', (req) => setServiceRequests((prev) => [req, ...prev]));
     }
   }, [socket]);
 
-  const updateStatus = async (orderId, newStatus) => {
-    try {
-      await API.patch(`/orders/${orderId}/status`, { status: newStatus });
-    } catch (err) {
-      alert('Failed to update order status');
-    }
-  };
+  const totalRevenue = orders.reduce((acc, curr) => acc + Number(curr.totalAmount || 0), 0);
+  const pendingOrders = orders.filter((o) => o.status === 'PENDING').length;
+
+  // Title generation from path name
+  const currentPath = location.pathname.split('/')[2] || 'orders';
 
   return (
-    <div className="min-h-screen bg-gray-100 p-6">
-      <div className="flex items-center justify-between bg-white p-4 rounded-xl shadow-sm mb-6">
-        <div className="flex items-center gap-3">
-          <LayoutDashboard className="text-orange-600" size={28} />
-          <h1 className="text-2xl font-bold text-gray-800">Admin Dashboard</h1>
-        </div>
-      </div>
+    <div className="min-h-screen bg-slate-900 text-slate-100 flex font-sans">
+      
+      {/* 1. SIDEBAR */}
+      <Sidebar 
+        pendingOrdersCount={pendingOrders}
+        requestsCount={serviceRequests.length}
+      />
 
-      {/* Service Requests Section */}
-      {serviceRequests.length > 0 && (
-        <div className="mb-6 bg-amber-50 border border-amber-200 p-4 rounded-xl">
-          <h2 className="text-lg font-bold text-amber-800 flex items-center gap-2 mb-3">
-            <Bell size={20} /> Service Requests
-          </h2>
-          <div className="flex flex-wrap gap-3">
-            {serviceRequests.map((req, idx) => (
-              <div key={idx} className="bg-white p-3 rounded-lg border shadow-sm flex items-center gap-3">
-                <span className="font-bold text-gray-800">Table #{req.table?.tableNumber || req.tableId}</span>
-                <span className="bg-amber-100 text-amber-800 px-2 py-1 rounded text-xs font-semibold">
-                  {req.type}
-                </span>
-                <button
-                  onClick={() => setServiceRequests((prev) => prev.filter((_, i) => i !== idx))}
-                  className="bg-green-100 text-green-700 p-1 rounded hover:bg-green-200"
-                >
-                  <Check size={16} />
-                </button>
-              </div>
-            ))}
+      {/* 2. MAIN LAYOUT AREA */}
+      <div className="flex-1 flex flex-col min-h-screen overflow-y-auto">
+        
+        {/* Top Header */}
+        <header className="bg-slate-950/70 border-b border-slate-800 px-8 py-4 sticky top-0 z-20 backdrop-blur-md flex justify-between items-center">
+          <div>
+            <h1 className="text-xl font-bold text-white capitalize">{currentPath} Overview</h1>
+            <p className="text-xs text-slate-400">Real-time restaurant control panel</p>
           </div>
-        </div>
-      )}
+          
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-3 py-1.5 rounded-full">
+              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span className="text-xs font-semibold text-emerald-400">System Live</span>
+            </div>
+          </div>
+        </header>
 
-      {/* Orders Overview */}
-      <div className="bg-white p-6 rounded-xl shadow-sm">
-        <h2 className="text-xl font-bold text-gray-800 mb-4">Active Orders</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="border-b text-gray-500 text-sm">
-                <th className="pb-3">Order ID</th>
-                <th className="pb-3">Table</th>
-                <th className="pb-3">Items</th>
-                <th className="pb-3">Total</th>
-                <th className="pb-3">Status</th>
-                <th className="pb-3">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => (
-                <tr key={order.id} className="border-b text-sm">
-                  <td className="py-3 font-semibold">#{order.id}</td>
-                  <td className="py-3">Table {order.table?.tableNumber || order.tableId}</td>
-                  <td className="py-3">
-                    {order.orderItems?.map((i) => `${i.menuItem?.name || 'Item'} (x${i.quantity})`).join(', ')}
-                  </td>
-                  <td className="py-3 font-bold text-orange-600">৳{order.totalAmount}</td>
-                  <td className="py-3">
-                    <span className="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs font-bold">
-                      {order.status}
-                    </span>
-                  </td>
-                  <td className="py-3">
-                    {order.status !== 'SERVED' && (
-                      <button
-                        onClick={() => updateStatus(order.id, 'SERVED')}
-                        className="bg-green-600 text-white px-3 py-1 rounded text-xs font-bold hover:bg-green-700"
-                      >
-                        Mark Served
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <main className="p-8 max-w-7xl w-full mx-auto flex-1">
+          {/* STAT CARDS */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
+            <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-5 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Sales</p>
+                <h3 className="text-2xl font-black text-emerald-400 mt-1">৳{totalRevenue}</h3>
+              </div>
+              <div className="bg-emerald-500/10 p-3 rounded-xl border border-emerald-500/20 text-emerald-400">
+                <DollarSign size={24} />
+              </div>
+            </div>
+
+            <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-5 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Pending Orders</p>
+                <h3 className="text-2xl font-black text-amber-400 mt-1">{pendingOrders}</h3>
+              </div>
+              <div className="bg-amber-500/10 p-3 rounded-xl border border-amber-500/20 text-amber-400">
+                <Clock size={24} />
+              </div>
+            </div>
+
+            <div className="bg-slate-800/80 border border-slate-700/60 rounded-2xl p-5 flex items-center justify-between">
+              <div>
+                <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Available Items</p>
+                <h3 className="text-2xl font-black text-blue-400 mt-1">
+                  {menuItems.filter((i) => i.isAvailable).length} / {menuItems.length}
+                </h3>
+              </div>
+              <div className="bg-blue-500/10 p-3 rounded-xl border border-blue-500/20 text-blue-400">
+                <Utensils size={24} />
+              </div>
+            </div>
+          </div>
+
+          {/* DYNAMIC PAGE RENDER BASED ON ROUTE */}
+          <Outlet context={{ orders, setOrders, menuItems, setMenuItems, serviceRequests, setServiceRequests }} />
+        </main>
       </div>
+
     </div>
   );
 };

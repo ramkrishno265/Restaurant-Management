@@ -9,12 +9,16 @@ generator client {
 
 // ১. রেস্তোরাঁর টেবিল
 model Table {
-  id              Int              @id @default(autoincrement())
-  tableNumber     String           @unique
-  qrCodeUrl       String?
-  orders          Order[]
-  serviceRequests ServiceRequest[]
-  createdAt       DateTime         @default(now())
+  id                   Int              @id @default(autoincrement())
+  tableNumber          String           @unique
+  capacity             Int              @default(4)
+  isOccupied           Boolean          @default(false)
+  currentCustomerName  String?
+  currentCustomerPhone String?
+  qrCodeUrl            String?
+  orders               Order[]
+  serviceRequests      ServiceRequest[]
+  createdAt            DateTime         @default(now())
 }
 
 // ২. মেনু ক্যাটাগরি (যেমন: Drinks, Appetizers, Main Course)
@@ -50,6 +54,8 @@ model Order {
   orderItems     OrderItem[]
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
+  customerName  String?
+  customerPhone String?
 }
 
 // অর্ডারের স্ট্যাটাস

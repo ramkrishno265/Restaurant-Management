@@ -1,8 +1,20 @@
 const express = require('express');
 const router = express.Router();
-const tableController = require('../controllers/tableController');
+const { 
+  getTables, 
+  createTable, 
+  deleteTable, 
+  occupyTable, 
+  clearTable 
+} = require('../controllers/tableController');
 
-router.post('/', tableController.createTable);
-router.get('/', tableController.getTables);
+// ১. অ্যাডমিন প্যানেলের রাউটসমূহ (Get, Create, Delete)
+router.get('/', getTables);
+router.post('/', createTable);
+router.delete('/:id', deleteTable);
+
+// ২. কাস্টমার ও টেবিল ম্যানেজমেন্ট রাউটসমূহ (Occupy & Clear)
+router.post('/:tableNumber/occupy', occupyTable);
+router.patch('/:id/clear', clearTable);
 
 module.exports = router;
