@@ -1,41 +1,132 @@
 const prisma = require('../config/db');
 
-// Get full menu with categories
+// 1. Get Menu Items (Customer & Admin both)
 exports.getMenu = async (req, res) => {
   try {
     const categories = await prisma.category.findMany({
       include: {
         menuItems: {
-          where: { isAvailable: true },
+          orderBy: { id: 'desc' },
         },
       },
     });
     res.json(categories);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch menu' });
+    console.error('Fetch Menu Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch menu' });
   }
 };
 
-// Create Category
-exports.createCategory = async (req, res) => {
-  try {
-    const { name } = req.body;
-    const category = await prisma.category.create({ data: { name } });
-    res.status(201).json(category);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create category' });
-  }
-};
-
-// Create Menu Item
+// 2. Create New Menu Item
 exports.createMenuItem = async (req, res) => {
   try {
-    const { categoryId, name, description, price, imageUrl } = req.body;
-    const menuItem = await prisma.menuItem.create({
-      data: { categoryId: Number(categoryId), name, description, price, imageUrl },
+    const { name, description, price, categoryName, imageUrl, isAvailable } = req.body;
+
+    if (!name || price === undefined || price === '') {
+      return res.status(400).json({ success: false, message: 'Name and Price are required' });
+    }
+
+    const catName = categoryName?.trim() || 'Main';
+    
+    // Check or create category
+    let category = await prisma.category.findFirst({
+      where: { name: catName },
     });
-    res.status(201).json(menuItem);
+
+    if (!category) {
+      category = await prisma.category.create({
+        data: { name: catName },
+      });
+    }
+
+    // Create Menu Item
+    const newItem = await prisma.menuItem.create({
+      data: {
+        name,
+        description: description || '',
+        price: parseFloat(price),
+        imageUrl: imageUrl || '',
+        isAvailable: isAvailable ?? true,
+        categoryId: category.id,
+      },
+      include: { category: true },
+    });
+
+    res.status(201).json(newItem);
   } catch (error) {
-    res.status(500).json({ error: 'Failed to add menu item' });
+    console.error('Create Menu Item Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to create menu item' });
+  }
+};
+
+// 3. Update Menu Item
+exports.updateMenuItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, description, price, categoryName, imageUrl, isAvailable } = req.body;
+
+    let categoryId = undefined;
+    if (categoryName) {
+      let category = await prisma.category.findFirst({
+        where: { name: categoryName },
+      });
+      if (!category) {
+        category = await prisma.category.create({
+          data: { name: categoryName },
+        });
+      }
+      categoryId = category.id;
+    }
+
+    const updatedItem = await prisma.menuItem.update({
+      where: { id: Number(id) },
+      data: {
+        name,
+        description,
+        price: price !== undefined ? parseFloat(price) : undefined,
+        imageUrl,
+        isAvailable,
+        ...(categoryId && { categoryId }),
+      },
+      include: { category: true },
+    });
+
+    res.json(updatedItem);
+  } catch (error) {
+    console.error('Update Menu Item Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to update menu item' });
+  }
+};
+
+// 4. Toggle Stock Availability
+exports.toggleAvailability = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { isAvailable } = req.body;
+
+    const updatedItem = await prisma.menuItem.update({
+      where: { id: Number(id) },
+      data: { isAvailable: Boolean(isAvailable) },
+    });
+
+    res.json(updatedItem);
+  } catch (error) {
+    console.error('Toggle Availability Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to toggle availability' });
+  }
+};
+
+// 5. Delete Menu Item
+exports.deleteMenuItem = async (req, res) => {
+  try {
+    const { id } = req.params;
+    await prisma.menuItem.delete({
+      where: { id: Number(id) },
+    });
+
+    res.json({ success: true, message: 'Menu item deleted successfully' });
+  } catch (error) {
+    console.error('Delete Menu Item Error:', error);
+    res.status(500).json({ success: false, message: 'Failed to delete menu item' });
   }
 };

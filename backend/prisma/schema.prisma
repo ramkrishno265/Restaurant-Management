@@ -24,23 +24,22 @@ model Table {
 // ২. মেনু ক্যাটাগরি (যেমন: Drinks, Appetizers, Main Course)
 model Category {
   id        Int        @id @default(autoincrement())
-  name      String
+  name      String     @unique
   menuItems MenuItem[]
   createdAt DateTime   @default(now())
 }
 
 // ৩. খাবার/আইটেম
 model MenuItem {
-  id          Int         @id @default(autoincrement())
-  categoryId  Int
-  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  id          Int      @id @default(autoincrement())
   name        String
   description String?
-  price       Decimal     @db.Decimal(10, 2)
+  price       Float
   imageUrl    String?
-  isAvailable Boolean     @default(true)
-  orderItems  OrderItem[]
-  createdAt   DateTime    @default(now())
+  isAvailable Boolean  @default(true)
+  categoryId  Int
+  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
 }
 
 // ৪. অর্ডার

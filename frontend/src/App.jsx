@@ -10,7 +10,8 @@ import AdminTables from './pages/admin/AdminTables';
 
 
 // Customer Page
-import CustomerMenu from './pages/Customer/CustomerMenu';
+
+import CustomerDashboard from './pages/Customer/CustomerDashboard';
 
 function App() {
   return (
@@ -21,10 +22,11 @@ function App() {
           <Route path="/" element={<Navigate to="/table/1" replace />} />
 
           {/* ২. টেবিলে QR কোড স্ক্যান করে আসার রাউট (এটি মিসিং ছিল) */}
-          <Route path="/table/:tableId" element={<CustomerMenu />} />
+          <Route path="/table/:tableId" element={<CustomerDashboard />} />
 
           {/* ৩. সাধারণ কাস্টমার মেনু রাউট */}
-          <Route path="/customer/menu" element={<CustomerMenu />} />
+          
+          <Route path="/customer/dashboard" element={<CustomerDashboard />} />
 
           {/* ৪. কিচেন ডিসপ্লে (KDS) রাউট */}
          
