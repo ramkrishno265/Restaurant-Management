@@ -26,7 +26,7 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // টেবিল ডাটাবেজে না পাওয়া গেলে অটোমেটিক ক্রিয়েট করা (Foreign Key Crash এড়াতে)
+    // টেবিল ডাটাবেজে না পাওয়া গেলে অটোমেটিক ক্রিয়েট করা
     if (!targetTable) {
       targetTable = await prisma.table.create({
         data: {
@@ -36,10 +36,10 @@ exports.createOrder = async (req, res) => {
       });
     }
 
-    // অর্ডার তৈরি করা
+    // নতুন অর্ডার তৈরি করা
     const newOrder = await prisma.order.create({
       data: {
-        tableId: targetTable.id, // গ্যারান্টিড সঠিক Database Primary Key ID
+        tableId: targetTable.id,
         customerName: customerName || 'Guest',
         customerPhone: customerPhone || 'N/A',
         specialRequest: specialRequest || null,
@@ -64,17 +64,71 @@ exports.createOrder = async (req, res) => {
       io.to('kitchen').to('admin').emit('new_order', newOrder);
     }
 
-    res.status(201).json(newOrder);
+    return res.status(201).json(newOrder);
   } catch (error) {
     console.error('Error placing order:', error);
-    res.status(500).json({ error: 'Failed to place order', details: error.message });
+    return res.status(500).json({ error: 'Failed to place order', details: error.message });
   }
 };
 
 // alias support
 exports.placeOrder = exports.createOrder;
 
-// ২. Get Active Orders (অ্যাডমিন ও কিচেন ড্যাশবোর্ডের জন্য)
+// ২. Update / Append Items to Existing Active Order (চলতি অর্ডারে নতুন খাবার যোগ করলে)
+exports.updateOrderItems = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { items, totalAmount } = req.body;
+
+    const existingOrder = await prisma.order.findUnique({
+      where: { id: Number(id) },
+    });
+
+    if (!existingOrder) {
+      return res.status(404).json({ error: 'Order not found' });
+    }
+
+    if (existingOrder.status !== 'PENDING') {
+      return res.status(400).json({ error: 'Order is already processing, cannot modify!' });
+    }
+
+    // আগের পুরোনো আইটেমগুলো মুছে নতুন কনসোলিডেটেড লিস্ট রিপ্লেস করা
+    await prisma.orderItem.deleteMany({
+      where: { orderId: Number(id) },
+    });
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: Number(id) },
+      data: {
+        totalAmount: Number(totalAmount),
+        orderItems: {
+          create: items.map((item) => ({
+            menuItemId: Number(item.menuItemId || item.id),
+            quantity: Number(item.quantity),
+            unitPrice: Number(item.unitPrice || item.price),
+          })),
+        },
+      },
+      include: {
+        table: true,
+        orderItems: { include: { menuItem: true } },
+      },
+    });
+
+    // Socket Emit to Admin & Kitchen
+    const io = getIO();
+    if (io) {
+      io.to('kitchen').to('admin').emit('new_order', updatedOrder);
+    }
+
+    return res.json(updatedOrder);
+  } catch (error) {
+    console.error('Error updating order items:', error);
+    return res.status(500).json({ error: 'Failed to update order items' });
+  }
+};
+
+// ৩. Get Active Orders (অ্যাডমিন ও কিচেন ড্যাশবোর্ডের জন্য)
 exports.getActiveOrders = async (req, res) => {
   try {
     const orders = await prisma.order.findMany({
@@ -83,19 +137,19 @@ exports.getActiveOrders = async (req, res) => {
         table: true,
         orderItems: { include: { menuItem: true } },
       },
-      orderBy: { createdAt: 'desc' }, // নতুন অর্ডার সবার উপরে দেখাবে
+      orderBy: { createdAt: 'desc' },
     });
-    res.json(orders);
+    return res.json(orders);
   } catch (error) {
     console.error('Error fetching orders:', error);
-    res.status(500).json({ error: 'Failed to fetch orders' });
+    return res.status(500).json({ error: 'Failed to fetch orders' });
   }
 };
 
 // alias support
 exports.getOrders = exports.getActiveOrders;
 
-// ৩. Update Order Status (অর্ডার স্ট্যাটাস পরিবর্তনের জন্য)
+// ৪. Update Order Status (অর্ডার স্ট্যাটাস পরিবর্তনের জন্য)
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id, orderId } = req.params;
@@ -124,14 +178,14 @@ exports.updateOrderStatus = async (req, res) => {
         .emit('order_status_updated', updatedOrder);
     }
 
-    res.json({ success: true, order: updatedOrder });
+    return res.json({ success: true, order: updatedOrder });
   } catch (error) {
     console.error('Error updating order status:', error);
-    res.status(500).json({ error: 'Failed to update order status' });
+    return res.status(500).json({ error: 'Failed to update order status' });
   }
 };
 
-// ৪. Cancel Order (কাস্টমার বা এডমিন ক্যানসেল করলে)
+// ৫. Cancel Full Order (কাস্টমার বা অ্যাডমিন সম্পূর্ণ অর্ডার বাতিল করলে)
 exports.cancelOrder = async (req, res) => {
   try {
     const { id } = req.params;
@@ -147,9 +201,9 @@ exports.cancelOrder = async (req, res) => {
       io.to('kitchen').to('admin').emit('order_status_updated', updatedOrder);
     }
 
-    res.json({ success: true, message: 'Order cancelled successfully' });
+    return res.json({ success: true, message: 'Order cancelled successfully' });
   } catch (error) {
     console.error('Error cancelling order:', error);
-    res.status(500).json({ error: 'Failed to cancel order' });
+    return res.status(500).json({ error: 'Failed to cancel order' });
   }
 };
