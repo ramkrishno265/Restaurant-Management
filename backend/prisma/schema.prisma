@@ -1,3 +1,4 @@
+
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
@@ -21,7 +22,7 @@ model Table {
   createdAt            DateTime         @default(now())
 }
 
-// ২. মেনু ক্যাটাগরি (যেমন: Drinks, Appetizers, Main Course)
+// ২. মেনু ক্যাটাগরি
 model Category {
   id        Int        @id @default(autoincrement())
   name      String     @unique
@@ -29,35 +30,38 @@ model Category {
   createdAt DateTime   @default(now())
 }
 
-// ৩. খাবার/আইটেম
+// ৩. খাবার / আইটেম
 model MenuItem {
-  id          Int      @id @default(autoincrement())
+  id          Int         @id @default(autoincrement())
   name        String
   description String?
   price       Float
   imageUrl    String?
-  isAvailable Boolean  @default(true)
+  isAvailable Boolean     @default(true)
   categoryId  Int
-  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-  createdAt   DateTime @default(now())
+  category    Category    @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems  OrderItem[]
+  createdAt   DateTime    @default(now())
 }
 
 // ৪. অর্ডার
 model Order {
-  id             Int         @id @default(autoincrement())
-  tableId        Int
-  table          Table       @relation(fields: [tableId], references: [id], onDelete: Cascade)
-  status         OrderStatus @default(PENDING)
-  specialRequest String?
-  totalAmount    Decimal     @db.Decimal(10, 2)
-  orderItems     OrderItem[]
-  createdAt      DateTime    @default(now())
-  updatedAt      DateTime    @updatedAt
-  customerName  String?
-  customerPhone String?
+  id               Int         @id @default(autoincrement())
+  tableId          Int
+  table            Table       @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  status           OrderStatus @default(PENDING)
+  specialRequest   String?
+  totalAmount      Decimal     @db.Decimal(10, 2)
+  estimatedMinutes Int?
+  cookingStartedAt DateTime?
+  orderItems       OrderItem[]
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  customerName     String?
+  customerPhone    String?
 }
 
-// অর্ডারের স্ট্যাটাস
+// ৫. অর্ডার স্ট্যাটাস
 enum OrderStatus {
   PENDING
   COOKING
@@ -66,7 +70,7 @@ enum OrderStatus {
   CANCELLED
 }
 
-// ৫. অর্ডারের ভেতরের আইটেমসমূহ
+// ৬. অর্ডারের ভেতরের আইটেমসমূহ
 model OrderItem {
   id         Int      @id @default(autoincrement())
   orderId    Int
@@ -77,7 +81,7 @@ model OrderItem {
   unitPrice  Decimal  @db.Decimal(10, 2)
 }
 
-// ৬. সার্ভিস রিকোয়েস্ট (ওয়েটার ডাকা/পানি/বিল)
+// ৭. সার্ভিস রিকোয়েস্ট
 model ServiceRequest {
   id        Int           @id @default(autoincrement())
   tableId   Int

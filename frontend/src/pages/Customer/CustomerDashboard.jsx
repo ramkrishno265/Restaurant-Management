@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useSocket } from '../../context/SocketContext';
-import API from '../../services/api';
+import { useSocket } from '../../context/SocketContext'; // আপনার Socket Context এর সঠিক পাথ
+import API from '../../services/api'; // আপনার API Instance
 import CustomerLoginModal from '../Customer/customerLogin';
 import CustomerMenuBar from '../../components/CustomerMenuBar';
+import OrderTrackerBanner from './CutomerComponent/OrderTrackerBanner';
 import {
     ShoppingBag,
     Utensils,
@@ -16,14 +17,12 @@ import {
     CheckCircle2,
     Sparkles,
     Trash2,
-    X,
-    Eye
+    X
 } from 'lucide-react';
 
 const CustomerDashboard = () => {
     const { tableId } = useParams();
     const socket = useSocket();
-   
 
     // State Management
     const [showLoginModal, setShowLoginModal] = useState(false);
@@ -36,61 +35,136 @@ const CustomerDashboard = () => {
     const [cart, setCart] = useState([]);
     const [isCartOpen, setIsCartOpen] = useState(false);
 
-    // Active Order Tracking State
-    const [activeOrder, setActiveOrder] = useState(null);
-    const [isOrderListOpen, setIsOrderListOpen] = useState(false);
+    // Active Orders & Loading State
+    const [activeOrders, setActiveOrders] = useState([]);
+    const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
 
     useEffect(() => {
-        // 1. Storage Check
+        // 1. Storage Check Customer Info
         const savedCustomer = localStorage.getItem(`customer_table_${tableId}`);
         if (savedCustomer) {
-            setCustomerInfo(JSON.parse(savedCustomer));
-            setShowLoginModal(false);
+            try {
+                setCustomerInfo(JSON.parse(savedCustomer));
+                setShowLoginModal(false);
+            } catch (e) {
+                setShowLoginModal(true);
+            }
         } else {
             setShowLoginModal(true);
         }
 
-        // 2. Fetch Menu & Filter Available Items Only
+        // 2. Instant Local Cache Load
+        const cachedOrders = localStorage.getItem(`cached_orders_${tableId}`);
+        if (cachedOrders) {
+            try {
+                const parsed = JSON.parse(cachedOrders);
+                setActiveOrders(Array.isArray(parsed) ? parsed : []);
+            } catch (e) {
+                console.error('Cache parsing error', e);
+            }
+        }
+
+        // 3. Fetch Menu Items (Safe Data Parsing)
         API.get('/menu')
             .then((res) => {
-                let categoryData = [];
-                if (Array.isArray(res.data)) {
-                    categoryData = res.data.map((cat) => ({
+                const rawData = res.data?.data || res.data || [];
+                if (Array.isArray(rawData)) {
+                    const categoryData = rawData.map((cat) => ({
                         ...cat,
                         menuItems: cat.menuItems?.filter((item) => item.isAvailable !== false) || []
-                    })).filter((cat) => cat.menuItems.length > 0);
+                    })).filter((cat) => cat.menuItems && cat.menuItems.length > 0);
+                    
+                    setCategories(categoryData);
                 }
-                setCategories(categoryData);
             })
             .catch((err) => console.error('Fetch Menu Error:', err));
 
-        // 3. Socket Real-Time Listeners
+        // 4. Initial Active Orders Fetch
+        if (tableId) {
+            API.get(`/orders/active/${tableId}`)
+                .then((res) => {
+                    const rawData = res.data;
+                    const ordersList = Array.isArray(rawData) ? rawData : (rawData ? [rawData] : []);
+                    setActiveOrders(ordersList);
+                    localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(ordersList));
+                })
+                .catch((err) => console.error('Fetch Active Orders Error:', err));
+        }
+
+        // 5. Socket Listener Configuration
         if (socket && tableId) {
-            const roomName = `table_${tableId}`;
-            socket.emit('join_table', roomName);
+            socket.emit('join_table', `table_${String(tableId)}`);
 
-            // Listen for Live Order Status Updates
-            socket.on('order_status_updated', (data) => {
-                if (String(data.tableId) === String(tableId)) {
-                    setActiveOrder((prev) => (prev ? { ...prev, status: data.status } : null));
+            const handleStatusUpdate = (data) => {
+                console.log('⚡ Live Socket Data Received:', data);
+
+                const incomingTable = String(data.tableNumber || data.tableId || data.table?.tableNumber || data.table?.id);
+                const currentTable = String(tableId);
+
+                if (incomingTable === currentTable) {
+                    setActiveOrders((prev) => {
+                        const targetId = data.orderId || data.id;
+                        const exists = prev.some((o) => String(o.id) === String(targetId));
+
+                        let updatedList;
+                        if (data.status === 'SERVED' || data.status === 'CANCELLED') {
+                            updatedList = prev.filter((o) => String(o.id) !== String(targetId));
+                        } else if (exists) {
+                            updatedList = prev.map((o) =>
+                                String(o.id) === String(targetId)
+                                    ? {
+                                        ...o,
+                                        status: data.status,
+                                        cookingStartedAt: data.cookingStartedAt || (data.status === 'COOKING' ? new Date().toISOString() : o.cookingStartedAt),
+                                        estimatedMinutes: data.estimatedMinutes || o.estimatedMinutes
+                                    }
+                                    : o
+                            );
+                        } else {
+                            updatedList = [...prev];
+                        }
+
+                        localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedList));
+                        return updatedList;
+                    });
                 }
-            });
+            };
 
-            // Listen for Admin Clear Table -> Live Auto Logout
+            const handleNewOrder = (newOrder) => {
+                const incomingTable = String(newOrder.table?.tableNumber || newOrder.tableId);
+                if (incomingTable === String(tableId)) {
+                    setActiveOrders((prev) => {
+                        const exists = prev.some((o) => String(o.id) === String(newOrder.id));
+                        const updated = exists ? prev.map((o) => String(o.id) === String(newOrder.id) ? newOrder : o) : [newOrder, ...prev];
+                        localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updated));
+                        return updated;
+                    });
+                }
+            };
+
             const handleTableCleared = () => {
                 localStorage.removeItem(`customer_table_${tableId}`);
+                localStorage.removeItem(`cached_orders_${tableId}`);
                 setCustomerInfo({ name: '', phone: '' });
                 setCart([]);
                 setIsCartOpen(false);
-                setActiveOrder(null);
+                setActiveOrders([]);
                 setShowLoginModal(true);
-                alert('⚠️ Apnar table session-ti Admin dwara clear kora hoyeche. Dhonnobad!');
+                alert('⚠️ Apnar table session-ti Admin dwara clear kora hoyeche!');
             };
 
+            socket.off('order_status_updated', handleStatusUpdate);
+            socket.off('new_order', handleNewOrder);
+            socket.off('table_cleared', handleTableCleared);
+
+            socket.on('order_status_updated', handleStatusUpdate);
+            socket.on('new_order', handleNewOrder);
             socket.on('table_cleared', handleTableCleared);
 
             return () => {
-                socket.off('order_status_updated');
+                socket.off('order_status_updated', handleStatusUpdate);
+                socket.off('new_order', handleNewOrder);
                 socket.off('table_cleared', handleTableCleared);
             };
         }
@@ -102,7 +176,7 @@ const CustomerDashboard = () => {
         setShowLoginModal(false);
     };
 
-    // Service Request Handler (Waiter, Water, Tissue)
+    // Service Request Handler
     const handleServiceRequest = async (type) => {
         try {
             await API.post('/service-requests', { tableId, type });
@@ -133,7 +207,7 @@ const CustomerDashboard = () => {
     const removeFromCart = (itemId) => {
         setCart((prevCart) => {
             const existing = prevCart.find((i) => i.id === itemId);
-            if (existing.quantity === 1) {
+            if (existing && existing.quantity === 1) {
                 return prevCart.filter((i) => i.id !== itemId);
             }
             return prevCart.map((i) =>
@@ -147,17 +221,17 @@ const CustomerDashboard = () => {
         return item ? item.quantity : 0;
     };
 
-    // Place Order Logic
-    // Place / Update Order Logic (Existing Order Sync Supported)
+    // Place / Update Order Logic
     const handlePlaceOrder = async () => {
-        if (cart.length === 0) return;
+        if (cart.length === 0 || isSubmitting) return;
 
-        // 1. Existing Active Order Thalle er Sathe Item Merge Korbo
+        setIsSubmitting(true);
+
+        const pendingOrder = activeOrders.find((o) => o.status === 'PENDING');
+
         let updatedItemsList = [];
-        if (activeOrder && activeOrder.status === 'PENDING') {
-            const existingItems = activeOrder.items || [];
-
-            // Cart-er new item gulo existing item list-er sathe append/update kora
+        if (pendingOrder) {
+            const existingItems = pendingOrder.items || [];
             updatedItemsList = [...existingItems];
 
             cart.forEach((cartItem) => {
@@ -165,13 +239,11 @@ const CustomerDashboard = () => {
                     (i) => (i.menuItemId || i.id) === cartItem.id
                 );
                 if (foundIndex > -1) {
-                    // Item age thakle quantity barano
                     updatedItemsList[foundIndex] = {
                         ...updatedItemsList[foundIndex],
                         quantity: updatedItemsList[foundIndex].quantity + cartItem.quantity
                     };
                 } else {
-                    // New item add kora
                     updatedItemsList.push({
                         menuItemId: cartItem.id,
                         name: cartItem.name,
@@ -182,7 +254,6 @@ const CustomerDashboard = () => {
                 }
             });
         } else {
-            // Clear fresh new order
             updatedItemsList = cart.map((i) => ({
                 menuItemId: i.id,
                 name: i.name,
@@ -192,7 +263,6 @@ const CustomerDashboard = () => {
             }));
         }
 
-        // Recalculate Combined Total Amount
         const totalAmount = updatedItemsList.reduce(
             (acc, item) => acc + (item.unitPrice || item.price) * item.quantity,
             0
@@ -208,87 +278,27 @@ const CustomerDashboard = () => {
 
         try {
             let res;
-            // Ager order active thakle API PATCH/PUT hobe, nahole fresh POST
-            if (activeOrder && activeOrder.status === 'PENDING') {
-                res = await API.patch(`/orders/${activeOrder.id}/items`, orderData);
+            if (pendingOrder) {
+                res = await API.patch(`/orders/${pendingOrder.id}/items`, orderData);
             } else {
                 res = await API.post('/orders', orderData);
             }
 
-            // Active Order State Update (Ager Item + New Item Total Sum)
-            setActiveOrder({
-                id: res.data?.id || activeOrder?.id || Date.now(),
-                status: activeOrder?.status || 'PENDING',
-                items: updatedItemsList,
-                totalAmount
-            });
+            // Refresh Active Orders
+            const updatedRes = await API.get(`/orders/active/${tableId}`);
+            const updatedData = Array.isArray(updatedRes.data) ? updatedRes.data : [updatedRes.data];
+            
+            setActiveOrders(updatedData);
+            localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedData));
 
             setCart([]);
             setIsCartOpen(false);
-            alert('✅ Apnar notun item-gulo purono order-er sathe safollobhabe add hoyeche!');
+            alert('✅ Order safollobhabe submit hoyeche!');
         } catch (err) {
             console.error('Order Submit Error:', err);
             alert('Order update/submit korte shomossha hochhe.');
-        }
-    };
-
-    // Cancel Full Order Logic
-    const handleCancelOrder = async () => {
-        if (!activeOrder) return;
-        if (activeOrder.status !== 'PENDING') {
-            alert('❌ Kitchen-e khabar toiri shuru hoye geche! Akn r order cancel kora shombhob noy.');
-            return;
-        }
-
-        if (!window.confirm('Apni ki nishchit je order-ti batil korte chan?')) return;
-
-        try {
-            await API.patch(`/orders/${activeOrder.id}/cancel`);
-            setActiveOrder(null);
-            alert('Order-ti batil kora hoyeche.');
-        } catch (err) {
-            setActiveOrder(null);
-        }
-    };
-
-    // Single Item Cancel Handler
-    const handleCancelSingleItem = async (itemId) => {
-        if (!activeOrder || activeOrder.status !== 'PENDING') {
-            alert('❌ রান্নাঘরে খাবার তৈরি শুরু হয়ে গেছে! এখন আর ক্যানসেল করা সম্ভব নয়।');
-            return;
-        }
-
-        if (!window.confirm('আপনি কি নিশ্চিত যে এই খাবারটি ক্যানসেল করতে চান?')) return;
-
-        const updatedItems = activeOrder.items.filter((i) => i.id !== itemId && i.menuItemId !== itemId);
-
-        if (updatedItems.length === 0) {
-            handleCancelOrder();
-            setIsOrderListOpen(false);
-            return;
-        }
-
-        const newTotal = updatedItems.reduce((acc, i) => acc + (i.unitPrice || i.price) * i.quantity, 0);
-
-        try {
-            await API.patch(`/orders/${activeOrder.id}/items`, {
-                items: updatedItems,
-                totalAmount: newTotal,
-            });
-
-            setActiveOrder((prev) => ({
-                ...prev,
-                items: updatedItems,
-                totalAmount: newTotal,
-            }));
-
-            alert('খাবারটি ক্যানসেল করা হয়েছে।');
-        } catch (err) {
-            setActiveOrder((prev) => ({
-                ...prev,
-                items: updatedItems,
-                totalAmount: newTotal,
-            }));
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -304,7 +314,7 @@ const CustomerDashboard = () => {
                 onSuccess={handleLoginSuccess}
             />
 
-            {/* 2. TOP NAVBAR & SIDEBAR COMPONENT */}
+            {/* 2. TOP NAVBAR COMPONENT */}
             <CustomerMenuBar
                 tableId={tableId}
                 customerInfo={customerInfo}
@@ -314,7 +324,7 @@ const CustomerDashboard = () => {
             {/* MAIN CONTAINER */}
             <main className="p-4 max-w-lg mx-auto w-full space-y-5 flex-1">
 
-                {/* 3. WELCOME BANNER WITH CUSTOMER DETAILS */}
+                {/* 3. WELCOME BANNER */}
                 <div className="bg-gradient-to-r from-orange-600/20 via-slate-800 to-slate-900 border border-orange-500/30 rounded-3xl p-5 shadow-xl relative overflow-hidden">
                     <div className="flex justify-between items-start relative z-10">
                         <div>
@@ -337,114 +347,49 @@ const CustomerDashboard = () => {
                     </div>
                 </div>
 
-                {/* 4. ACTIVE ORDER TRACKER BANNER */}
-                {activeOrder && (
-                    <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl shadow-xl space-y-3">
-                        <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2.5">
-                                <Clock className="text-orange-400 animate-pulse" size={20} />
-                                <div>
-                                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Order Status</p>
-                                    <p className="text-sm font-black text-orange-400 uppercase">{activeOrder.status}</p>
-                                </div>
-                            </div>
+                {/* 4. ORDER TRACKER BANNER (Supports Multiple Active Orders Array) */}
+                <OrderTrackerBanner
+                    activeOrders={activeOrders}
+                    onViewDetails={(order) => setSelectedOrderDetails(order)}
+                />
 
-                            <button
-                                onClick={() => setIsOrderListOpen(true)}
-                                className="bg-orange-600/10 border border-orange-500/30 text-orange-400 text-xs font-bold px-3.5 py-1.5 rounded-xl flex items-center gap-1.5 hover:bg-orange-600/20 active:scale-95 transition"
-                            >
-                                <Eye size={14} /> View Order List
-                            </button>
-                        </div>
-
-                        <div className="border-t border-slate-800/80 pt-2 flex justify-between items-center text-xs text-slate-400">
-                            <span>Mot Item: <strong className="text-white">{activeOrder.items?.length || 0} ti</strong></span>
-                            <span>Total Bill: <strong className="text-orange-400 font-extrabold text-sm">৳{activeOrder.totalAmount}</strong></span>
-                        </div>
-                    </div>
-                )}
-
-                {/* VIEW ORDER LIST MODAL POPUP */}
-                {isOrderListOpen && activeOrder && (
+                {/* VIEW ORDER DETAILS MODAL */}
+                {selectedOrderDetails && (
                     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-200 relative">
-
-                            {/* Header */}
+                        <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 relative">
                             <div className="flex justify-between items-center border-b border-slate-800 pb-3">
                                 <div>
                                     <h3 className="text-base font-bold text-white flex items-center gap-2">
-                                        <Utensils size={18} className="text-orange-500" /> আপনার অর্ডার তালিকা
+                                        <Utensils size={18} className="text-orange-500" /> Order #{selectedOrderDetails.id} Details
                                     </h3>
                                     <p className="text-[10px] text-slate-400 mt-0.5">
-                                        স্ট্যাটাস: <span className="text-orange-400 font-bold uppercase">{activeOrder.status}</span>
+                                        Status: <span className="text-orange-400 font-bold uppercase">{selectedOrderDetails.status}</span>
                                     </p>
                                 </div>
                                 <button
-                                    onClick={() => setIsOrderListOpen(false)}
+                                    onClick={() => setSelectedOrderDetails(null)}
                                     className="text-slate-400 hover:text-white p-1 rounded-lg"
                                 >
                                     <X size={20} />
                                 </button>
                             </div>
 
-                            {/* Item List */}
-                            <div className="space-y-3 max-h-60 overflow-y-auto pr-1 scrollbar-none">
-                                {activeOrder.items?.map((item) => (
-                                    <div
-                                        key={item.id || item.menuItemId}
-                                        className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 flex justify-between items-center"
-                                    >
+                            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
+                                {selectedOrderDetails.items?.map((item) => (
+                                    <div key={item.id || item.menuItemId} className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 flex justify-between items-center">
                                         <div>
                                             <h4 className="font-bold text-slate-100 text-sm">{item.name}</h4>
-                                            <p className="text-xs text-slate-400 mt-0.5">
-                                                ৳{item.unitPrice || item.price} × {item.quantity}
-                                            </p>
+                                            <p className="text-xs text-slate-400 mt-0.5">৳{item.unitPrice || item.price} × {item.quantity}</p>
                                         </div>
-
-                                        <div className="flex items-center gap-3">
-                                            <span className="font-extrabold text-orange-400 text-sm">
-                                                ৳{(item.unitPrice || item.price) * item.quantity}
-                                            </span>
-
-                                            {/* Single Item Cancel Button */}
-                                            {activeOrder.status === 'PENDING' ? (
-                                                <button
-                                                    onClick={() => handleCancelSingleItem(item.id || item.menuItemId)}
-                                                    className="p-1.5 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 rounded-xl border border-rose-500/30 transition"
-                                                    title="এই খাবারটি ক্যানসেল করুন"
-                                                >
-                                                    <Trash2 size={15} />
-                                                </button>
-                                            ) : (
-                                                <span className="text-[10px] text-slate-500 bg-slate-900 px-2 py-1 rounded-md border border-slate-800">
-                                                    🔒 Locked
-                                                </span>
-                                            )}
-                                        </div>
+                                        <span className="font-extrabold text-orange-400 text-sm">৳{(item.unitPrice || item.price) * item.quantity}</span>
                                     </div>
                                 ))}
                             </div>
 
-                            {/* Bottom Summary & Actions */}
-                            <div className="border-t border-slate-800 pt-3 space-y-3">
-                                <div className="flex justify-between items-center text-sm font-bold">
-                                    <span className="text-slate-400">মোট পরিশোধযোগ্য:</span>
-                                    <span className="text-orange-400 text-base font-black">৳{activeOrder.totalAmount}</span>
-                                </div>
-
-                                {activeOrder.status === 'PENDING' && (
-                                    <button
-                                        onClick={() => {
-                                            handleCancelOrder();
-                                            setIsOrderListOpen(false);
-                                        }}
-                                        className="w-full bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 py-3 rounded-2xl font-bold text-xs flex items-center justify-center gap-2 transition"
-                                    >
-                                        <XCircle size={16} /> সম্পূর্ণ অর্ডার বাতিল করুন
-                                    </button>
-                                )}
+                            <div className="border-t border-slate-800 pt-3 flex justify-between items-center text-sm font-bold">
+                                <span className="text-slate-400">Total Bill:</span>
+                                <span className="text-orange-400 text-base font-black">৳{selectedOrderDetails.totalAmount}</span>
                             </div>
-
                         </div>
                     </div>
                 )}
@@ -480,89 +425,89 @@ const CustomerDashboard = () => {
 
                 {/* 6. MENU ITEMS LIST */}
                 <div className="space-y-6">
-                    {categories
-                        .filter((cat) => selectedCategory === 'ALL' || cat.name === selectedCategory)
-                        .map((cat) => {
-                            const filteredItems = cat.menuItems?.filter((i) =>
-                                i.name.toLowerCase().includes(searchQuery.toLowerCase())
-                            );
+                    {categories.length === 0 ? (
+                        <p className="text-center py-12 text-slate-500 text-xs">Kono menu item pawa jayni.</p>
+                    ) : (
+                        categories
+                            .filter((cat) => selectedCategory === 'ALL' || cat.name === selectedCategory)
+                            .map((cat) => {
+                                const filteredItems = cat.menuItems?.filter((i) =>
+                                    i.name.toLowerCase().includes(searchQuery.toLowerCase())
+                                );
 
-                            if (!filteredItems || filteredItems.length === 0) return null;
+                                if (!filteredItems || filteredItems.length === 0) return null;
 
-                            return (
-                                <div key={cat.id} className="space-y-3">
-                                    <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">
-                                        {cat.name}
-                                    </h2>
+                                return (
+                                    <div key={cat.id} className="space-y-3">
+                                        <h2 className="text-xs font-extrabold text-slate-400 uppercase tracking-widest border-b border-slate-800 pb-2">
+                                            {cat.name}
+                                        </h2>
 
-                                    <div className="grid grid-cols-1 gap-3.5">
-                                        {filteredItems.map((item) => {
-                                            const qty = getItemQuantity(item.id);
+                                        <div className="grid grid-cols-1 gap-3.5">
+                                            {filteredItems.map((item) => {
+                                                const qty = getItemQuantity(item.id);
 
-                                            return (
-                                                <div
-                                                    key={item.id}
-                                                    className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-3.5 flex items-center justify-between gap-3.5 shadow-md hover:border-slate-700 transition"
-                                                >
-                                                    {/* 1. Item Image Section */}
-                                                    <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 shrink-0">
-                                                        {item.imageUrl ? (
-                                                            <img
-                                                                src={item.imageUrl}
-                                                                alt={item.name}
-                                                                className="w-full h-full object-cover"
-                                                            />
-                                                        ) : (
-                                                            <div className="w-full h-full flex flex-col items-center justify-center text-slate-600 bg-slate-950">
-                                                                <Utensils size={26} />
-                                                                <span className="text-[9px] mt-1 text-slate-500">Chobi Nei</span>
-                                                            </div>
-                                                        )}
-                                                    </div>
+                                                return (
+                                                    <div
+                                                        key={item.id}
+                                                        className="bg-slate-900/80 border border-slate-800/90 rounded-2xl p-3.5 flex items-center justify-between gap-3.5 shadow-md hover:border-slate-700 transition"
+                                                    >
+                                                        {/* Image */}
+                                                        <div className="relative w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden bg-slate-950 border border-slate-800 shrink-0">
+                                                            {item.imageUrl ? (
+                                                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-cover" />
+                                                            ) : (
+                                                                <div className="w-full h-full flex flex-col items-center justify-center text-slate-600 bg-slate-950">
+                                                                    <Utensils size={26} />
+                                                                    <span className="text-[9px] mt-1 text-slate-500">Chobi Nei</span>
+                                                                </div>
+                                                            )}
+                                                        </div>
 
-                                                    {/* 2. Item Details Section */}
-                                                    <div className="flex-1 min-w-0">
-                                                        <h3 className="font-bold text-slate-100 text-sm truncate">{item.name}</h3>
-                                                        <p className="text-xs text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
-                                                            {item.description || 'Kono biboron dewa hoyni.'}
-                                                        </p>
-                                                        <p className="text-orange-400 font-black text-base mt-1.5">৳{item.price}</p>
-                                                    </div>
+                                                        {/* Item Details */}
+                                                        <div className="flex-1 min-w-0">
+                                                            <h3 className="font-bold text-slate-100 text-sm truncate">{item.name}</h3>
+                                                            <p className="text-xs text-slate-400 line-clamp-2 mt-0.5 leading-relaxed">
+                                                                {item.description || 'Kono biboron dewa hoyni.'}
+                                                            </p>
+                                                            <p className="text-orange-400 font-black text-base mt-1.5">৳{item.price}</p>
+                                                        </div>
 
-                                                    {/* 3. Add / Quantity Button Section */}
-                                                    <div className="shrink-0">
-                                                        {qty === 0 ? (
-                                                            <button
-                                                                onClick={() => addToCart(item)}
-                                                                className="bg-orange-600 hover:bg-orange-500 active:scale-95 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-orange-600/20"
-                                                            >
-                                                                + Jog Korun
-                                                            </button>
-                                                        ) : (
-                                                            <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 p-1 rounded-xl">
-                                                                <button
-                                                                    onClick={() => removeFromCart(item.id)}
-                                                                    className="w-7 h-7 bg-slate-700 text-white rounded-lg flex items-center justify-center font-bold"
-                                                                >
-                                                                    <Minus size={14} />
-                                                                </button>
-                                                                <span className="text-xs font-extrabold text-white px-1">{qty}</span>
+                                                        {/* Add / Quantity Button */}
+                                                        <div className="shrink-0">
+                                                            {qty === 0 ? (
                                                                 <button
                                                                     onClick={() => addToCart(item)}
-                                                                    className="w-7 h-7 bg-orange-600 text-white rounded-lg flex items-center justify-center font-bold"
+                                                                    className="bg-orange-600 hover:bg-orange-500 active:scale-95 text-white px-3.5 py-2 rounded-xl text-xs font-bold transition shadow-md shadow-orange-600/20"
                                                                 >
-                                                                    <Plus size={14} />
+                                                                    + Jog Korun
                                                                 </button>
-                                                            </div>
-                                                        )}
+                                                            ) : (
+                                                                <div className="flex items-center gap-2 bg-slate-800 border border-slate-700 p-1 rounded-xl">
+                                                                    <button
+                                                                        onClick={() => removeFromCart(item.id)}
+                                                                        className="w-7 h-7 bg-slate-700 text-white rounded-lg flex items-center justify-center font-bold"
+                                                                    >
+                                                                        <Minus size={14} />
+                                                                    </button>
+                                                                    <span className="text-xs font-extrabold text-white px-1">{qty}</span>
+                                                                    <button
+                                                                        onClick={() => addToCart(item)}
+                                                                        className="w-7 h-7 bg-orange-600 text-white rounded-lg flex items-center justify-center font-bold"
+                                                                    >
+                                                                        <Plus size={14} />
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            );
-                                        })}
+                                                );
+                                            })}
+                                        </div>
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })
+                    )}
                 </div>
             </main>
 
@@ -610,9 +555,18 @@ const CustomerDashboard = () => {
                         <div className="pt-2">
                             <button
                                 onClick={handlePlaceOrder}
-                                className="w-full bg-orange-600 active:scale-95 text-white py-4 rounded-2xl font-bold text-base shadow-lg transition flex items-center justify-center gap-2"
+                                disabled={isSubmitting}
+                                className="w-full bg-orange-600 disabled:bg-orange-800/80 active:scale-95 text-white py-4 rounded-2xl font-bold text-base shadow-lg transition flex items-center justify-center gap-2"
                             >
-                                <CheckCircle2 size={18} /> Order Nishchit Korun
+                                {isSubmitting ? (
+                                    <span className="inline-flex items-center gap-2 animate-pulse">
+                                        <Clock className="animate-spin" size={18} /> Processing Order...
+                                    </span>
+                                ) : (
+                                    <>
+                                        <CheckCircle2 size={18} /> Order Nishchit Korun
+                                    </>
+                                )}
                             </button>
                         </div>
                     </div>
