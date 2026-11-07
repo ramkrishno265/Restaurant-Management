@@ -1,50 +1,51 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useOutletContext } from 'react-router-dom';
 import API from '../../services/api';
-import { useSocket } from '../../context/SocketContext'; // ⚡ সকেট কন্টেক্সট ইম্পোর্ট
+import { useSocket } from '../../context/SocketContext';
 import { TrendingUp, CheckCircle, Clock, XCircle, ChefHat } from 'lucide-react';
 
 const AdminOrders = () => {
   const { orders, setOrders } = useOutletContext();
-  const socket = useSocket(); // ⚡ Socket Hook
+  const socket = useSocket();
   const [cookingTimes, setCookingTimes] = useState({});
 
-  // ⚡ 1. REAL-TIME SOCKET LISTENERS (লাইভ অর্ডারের পরিবর্তন রিসিভ করার জন্য)
-  // AdminOrders.jsx-এর useEffect আপডেট
+  // ✅ Duplicate order hatiye unique list banano (same id hole shesh ta rakhe)
+  const uniqueOrders = useMemo(() => {
+    const map = new Map();
+    (orders || []).forEach((o) => map.set(String(o.id), o));
+    return Array.from(map.values());
+  }, [orders]);
+
+  // ✅ 1. Initial fetch (alada effect)
   useEffect(() => {
-    // 1. Initial Order Fetch (API Call)
     API.get('/orders/active')
-      .then((res) => {
-        setOrders(res.data);
-      })
+      .then((res) => setOrders(res.data))
       .catch((err) => console.error('Error fetching orders:', err));
+  }, [setOrders]);
 
-    // 2. Real-time Socket listener (Duplicate Prevention Logic)
-    if (socket) {
-      socket.emit('join_admin'); // বা join_kitchen
+  // ✅ 2. Socket listener (alada effect, thik cleanup shoho)
+  useEffect(() => {
+    if (!socket) return;
 
-      const handleNewOrder = (newOrder) => {
-        setOrders((prevOrders) => {
-          // Strict String Check to prevent Duplicate Rendering
-          const exists = prevOrders.some((o) => String(o.id) === String(newOrder.id));
-          if (exists) {
-            return prevOrders.map((o) => (String(o.id) === String(newOrder.id) ? newOrder : o));
-          }
-          return [newOrder, ...prevOrders];
-        });
-      };
+    socket.emit('join_admin');
 
-      // মেমোরি লিক এবং ডুপ্লিকেট লিসেনার এড়াতে আগের লিসেনার অফ করা
+    const handleNewOrder = (newOrder) => {
+      setOrders((prev) => {
+        const exists = prev.some((o) => String(o.id) === String(newOrder.id));
+        return exists
+          ? prev.map((o) => (String(o.id) === String(newOrder.id) ? newOrder : o))
+          : [newOrder, ...prev];
+      });
+    };
+
+    socket.on('new_order', handleNewOrder);
+
+    return () => {
       socket.off('new_order', handleNewOrder);
-      socket.on('new_order', handleNewOrder);
+    };
+  }, [socket, setOrders]);
 
-      return () => {
-        socket.off('new_order', handleNewOrder);
-      };
-    }
-  }, [socket]);
-
-  // 2. Status Change Handler
+  // 3. Status Change Handler
   const updateOrderStatus = async (orderId, newStatus) => {
     try {
       const payload = { status: newStatus };
@@ -59,23 +60,27 @@ const AdminOrders = () => {
       setOrders((prev) =>
         prev
           .map((o) =>
-            o.id === orderId
+            String(o.id) === String(orderId)
               ? { ...o, status: newStatus, estimatedMinutes: payload.estimatedMinutes }
               : o
           )
-          .filter((o) => newStatus !== 'SERVED' && newStatus !== 'CANCELLED' ? true : o.id !== orderId)
+          .filter((o) =>
+            newStatus === 'SERVED' || newStatus === 'CANCELLED'
+              ? String(o.id) !== String(orderId)
+              : true
+          )
       );
     } catch (err) {
       alert('Failed to update order status');
     }
   };
 
-  // 3. Cancel Order Handler
+  // 4. Cancel Order Handler
   const handleCancelOrder = async (orderId) => {
     if (!window.confirm('Are you sure you want to cancel this order?')) return;
     try {
       await API.patch(`/orders/${orderId}/cancel`);
-      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setOrders((prev) => prev.filter((o) => String(o.id) !== String(orderId)));
     } catch (err) {
       alert('Failed to cancel order');
     }
@@ -105,12 +110,15 @@ const AdminOrders = () => {
         <TrendingUp className="text-orange-500" size={20} /> Live Table Orders
       </h2>
 
-      {orders.length === 0 ? (
+      {uniqueOrders.length === 0 ? (
         <p className="text-center py-12 text-slate-500">Kono active order nei ekhon.</p>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {orders.map((order) => (
-            <div key={order.id} className="bg-slate-800 border border-slate-700 rounded-xl p-5 flex flex-col justify-between shadow-lg">
+          {uniqueOrders.map((order) => (
+            <div
+              key={order.id}
+              className="bg-slate-800 border border-slate-700 rounded-xl p-5 flex flex-col justify-between shadow-lg"
+            >
               <div>
                 {/* Header: Table Number & Status */}
                 <div className="flex justify-between items-center border-b border-slate-700/80 pb-3 mb-3">
@@ -118,9 +126,15 @@ const AdminOrders = () => {
                     <span className="bg-orange-500/10 text-orange-400 border border-orange-500/20 px-3 py-1 rounded-lg text-sm font-extrabold">
                       Table #{order.table?.tableNumber || order.tableId}
                     </span>
-                    <p className="text-xs text-slate-400 mt-1">Customer: {order.customerName || 'Guest'}</p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      Customer: {order.customerName || 'Guest'}
+                    </p>
                   </div>
-                  <span className={`text-xs font-bold px-2.5 py-1 rounded-md border ${getStatusBadgeClass(order.status)}`}>
+                  <span
+                    className={`text-xs font-bold px-2.5 py-1 rounded-md border ${getStatusBadgeClass(
+                      order.status
+                    )}`}
+                  >
                     {order.status}
                   </span>
                 </div>
@@ -146,7 +160,9 @@ const AdminOrders = () => {
                       type="number"
                       min="1"
                       defaultValue={cookingTimes[order.id] || 20}
-                      onChange={(e) => setCookingTimes({ ...cookingTimes, [order.id]: e.target.value })}
+                      onChange={(e) =>
+                        setCookingTimes((prev) => ({ ...prev, [order.id]: e.target.value }))
+                      }
                       className="w-16 bg-slate-800 border border-slate-700 text-white text-xs px-2 py-1 rounded focus:outline-none focus:border-orange-500"
                     />
                   </div>
@@ -188,7 +204,6 @@ const AdminOrders = () => {
                       </button>
                     )}
 
-                    {/* Cancel Button */}
                     {order.status !== 'SERVED' && order.status !== 'CANCELLED' && (
                       <button
                         onClick={() => handleCancelOrder(order.id)}
@@ -201,7 +216,6 @@ const AdminOrders = () => {
                   </div>
                 </div>
               </div>
-
             </div>
           ))}
         </div>

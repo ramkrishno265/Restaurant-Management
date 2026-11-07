@@ -1,5 +1,15 @@
 const prisma = require('../config/db');
 
+// ✅ Socket e "menu_updated" pathanor helper (io na thakleo crash korbe na)
+const emitMenuUpdate = (req, payload) => {
+  try {
+    const io = req.app.get('io');
+    if (io) io.emit('menu_updated', payload);
+  } catch (err) {
+    console.error('Menu socket emit error:', err);
+  }
+};
+
 // 1. Get Menu Items (Customer & Admin both)
 exports.getMenu = async (req, res) => {
   try {
@@ -27,7 +37,7 @@ exports.createMenuItem = async (req, res) => {
     }
 
     const catName = categoryName?.trim() || 'Main';
-    
+
     // Check or create category
     let category = await prisma.category.findFirst({
       where: { name: catName },
@@ -50,6 +60,13 @@ exports.createMenuItem = async (req, res) => {
         categoryId: category.id,
       },
       include: { category: true },
+    });
+
+    // ⚡ Live update
+    emitMenuUpdate(req, {
+      action: 'created',
+      id: newItem.id,
+      isAvailable: newItem.isAvailable,
     });
 
     res.status(201).json(newItem);
@@ -91,6 +108,13 @@ exports.updateMenuItem = async (req, res) => {
       include: { category: true },
     });
 
+    // ⚡ Live update
+    emitMenuUpdate(req, {
+      action: 'updated',
+      id: updatedItem.id,
+      isAvailable: updatedItem.isAvailable,
+    });
+
     res.json(updatedItem);
   } catch (error) {
     console.error('Update Menu Item Error:', error);
@@ -109,6 +133,13 @@ exports.toggleAvailability = async (req, res) => {
       data: { isAvailable: Boolean(isAvailable) },
     });
 
+    // ⚡ Live update
+    emitMenuUpdate(req, {
+      action: 'toggled',
+      id: updatedItem.id,
+      isAvailable: updatedItem.isAvailable,
+    });
+
     res.json(updatedItem);
   } catch (error) {
     console.error('Toggle Availability Error:', error);
@@ -122,6 +153,13 @@ exports.deleteMenuItem = async (req, res) => {
     const { id } = req.params;
     await prisma.menuItem.delete({
       where: { id: Number(id) },
+    });
+
+    // ⚡ Live update (delete hole item unavailable er moto kaj korbe)
+    emitMenuUpdate(req, {
+      action: 'deleted',
+      id: Number(id),
+      isAvailable: false,
     });
 
     res.json({ success: true, message: 'Menu item deleted successfully' });

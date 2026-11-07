@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { useSocket } from '../../context/SocketContext'; // আপনার Socket Context এর সঠিক পাথ
-import API from '../../services/api'; // আপনার API Instance
+import { useSocket } from '../../context/SocketContext';
+import API from '../../services/api';
 import CustomerLoginModal from '../Customer/customerLogin';
 import CustomerMenuBar from '../../components/CustomerMenuBar';
 import OrderTrackerBanner from './CutomerComponent/OrderTrackerBanner';
@@ -12,11 +12,9 @@ import {
     Plus,
     Minus,
     Clock,
-    XCircle,
     Search,
     CheckCircle2,
     Sparkles,
-    Trash2,
     X
 } from 'lucide-react';
 
@@ -39,6 +37,34 @@ const CustomerDashboard = () => {
     const [activeOrders, setActiveOrders] = useState([]);
     const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // ⚡ Menu fetch (alada function, jate socket event e abar call kora jay)
+    const fetchMenu = useCallback(() => {
+        API.get('/menu')
+            .then((res) => {
+                const rawData = res.data?.data || res.data || [];
+                if (Array.isArray(rawData)) {
+                    const categoryData = rawData
+                        .map((cat) => ({
+                            ...cat,
+                            menuItems: cat.menuItems?.filter((item) => item.isAvailable !== false) || []
+                        }))
+                        .filter((cat) => cat.menuItems.length > 0);
+
+                    setCategories(categoryData);
+
+                    // ⚡ Cart e thaka kono item jodi ar available na thake, cart theke soriye dao
+                    const availableIds = new Set(
+                        categoryData.flatMap((cat) => cat.menuItems.map((i) => String(i.id)))
+                    );
+                    setCart((prev) => {
+                        const filtered = prev.filter((i) => availableIds.has(String(i.id)));
+                        return filtered.length === prev.length ? prev : filtered;
+                    });
+                }
+            })
+            .catch((err) => console.error('Fetch Menu Error:', err));
+    }, []);
 
     useEffect(() => {
         // 1. Storage Check Customer Info
@@ -65,20 +91,8 @@ const CustomerDashboard = () => {
             }
         }
 
-        // 3. Fetch Menu Items (Safe Data Parsing)
-        API.get('/menu')
-            .then((res) => {
-                const rawData = res.data?.data || res.data || [];
-                if (Array.isArray(rawData)) {
-                    const categoryData = rawData.map((cat) => ({
-                        ...cat,
-                        menuItems: cat.menuItems?.filter((item) => item.isAvailable !== false) || []
-                    })).filter((cat) => cat.menuItems && cat.menuItems.length > 0);
-                    
-                    setCategories(categoryData);
-                }
-            })
-            .catch((err) => console.error('Fetch Menu Error:', err));
+        // 3. Fetch Menu Items
+        fetchMenu();
 
         // 4. Initial Active Orders Fetch
         if (tableId) {
@@ -154,21 +168,33 @@ const CustomerDashboard = () => {
                 alert('⚠️ Apnar table session-ti Admin dwara clear kora hoyeche!');
             };
 
+            // ⚡ Admin menu change korle live menu refresh
+            const handleMenuUpdated = (data) => {
+                console.log('⚡ menu_updated received:', data);
+                if (data?.id && data.isAvailable === false) {
+                    setCart((prev) => prev.filter((i) => String(i.id) !== String(data.id)));
+                }
+                fetchMenu();
+            };
+
             socket.off('order_status_updated', handleStatusUpdate);
             socket.off('new_order', handleNewOrder);
             socket.off('table_cleared', handleTableCleared);
+            socket.off('menu_updated', handleMenuUpdated);
 
             socket.on('order_status_updated', handleStatusUpdate);
             socket.on('new_order', handleNewOrder);
             socket.on('table_cleared', handleTableCleared);
+            socket.on('menu_updated', handleMenuUpdated);
 
             return () => {
                 socket.off('order_status_updated', handleStatusUpdate);
                 socket.off('new_order', handleNewOrder);
                 socket.off('table_cleared', handleTableCleared);
+                socket.off('menu_updated', handleMenuUpdated);
             };
         }
-    }, [socket, tableId]);
+    }, [socket, tableId, fetchMenu]);
 
     // Login Success Callback
     const handleLoginSuccess = (info) => {
@@ -220,6 +246,11 @@ const CustomerDashboard = () => {
         const item = cart.find((i) => i.id === itemId);
         return item ? item.quantity : 0;
     };
+
+    // Cart khali hoye gele cart modal bondho kore dao
+    useEffect(() => {
+        if (cart.length === 0 && isCartOpen) setIsCartOpen(false);
+    }, [cart, isCartOpen]);
 
     // Place / Update Order Logic
     const handlePlaceOrder = async () => {
@@ -277,17 +308,16 @@ const CustomerDashboard = () => {
         };
 
         try {
-            let res;
             if (pendingOrder) {
-                res = await API.patch(`/orders/${pendingOrder.id}/items`, orderData);
+                await API.patch(`/orders/${pendingOrder.id}/items`, orderData);
             } else {
-                res = await API.post('/orders', orderData);
+                await API.post('/orders', orderData);
             }
 
             // Refresh Active Orders
             const updatedRes = await API.get(`/orders/active/${tableId}`);
             const updatedData = Array.isArray(updatedRes.data) ? updatedRes.data : [updatedRes.data];
-            
+
             setActiveOrders(updatedData);
             localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedData));
 
@@ -303,6 +333,13 @@ const CustomerDashboard = () => {
     };
 
     const categoryNames = ['ALL', ...categories.map((c) => c.name)];
+
+    // ⚡ Selected category jodi menu theke chole jay, ALL e fire jao
+    useEffect(() => {
+        if (selectedCategory !== 'ALL' && !categories.some((c) => c.name === selectedCategory)) {
+            setSelectedCategory('ALL');
+        }
+    }, [categories, selectedCategory]);
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 font-sans select-none flex flex-col antialiased pb-28">
