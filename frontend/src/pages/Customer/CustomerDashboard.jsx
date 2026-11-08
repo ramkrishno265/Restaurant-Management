@@ -5,6 +5,7 @@ import API from '../../services/api';
 import CustomerLoginModal from '../Customer/customerLogin';
 import CustomerMenuBar from '../../components/CustomerMenuBar';
 import OrderTrackerBanner from './CutomerComponent/OrderTrackerBanner';
+import CustomerBillModal from './CutomerComponent/CutomerBill';
 import {
     ShoppingBag,
     Utensils,
@@ -17,6 +18,14 @@ import {
     Sparkles,
     X
 } from 'lucide-react';
+
+// ✅ FIX 2: API response e { success, data: [...] } ba shudhu [...] - duto shapei kaj korbe
+const normalizeOrders = (resData) => {
+    const raw = resData?.data ?? resData;
+    if (Array.isArray(raw)) return raw;
+    if (raw && typeof raw === 'object') return [raw];
+    return [];
+};
 
 const CustomerDashboard = () => {
     const { tableId } = useParams();
@@ -37,6 +46,11 @@ const CustomerDashboard = () => {
     const [activeOrders, setActiveOrders] = useState([]);
     const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [cancellingId, setCancellingId] = useState(null);
+
+    // ✅ FIX 1: SERVED hoye gele order activeOrders theke soriye jay,
+    // tai bill-er jonno shesh SERVED order alada rakha hocche
+    const [billOrder, setBillOrder] = useState(null);
 
     // ⚡ Menu fetch (alada function, jate socket event e abar call kora jay)
     const fetchMenu = useCallback(() => {
@@ -91,6 +105,16 @@ const CustomerDashboard = () => {
             }
         }
 
+        // ✅ Shesh SERVED bill cache load (page refresh dileo bill thakbe)
+        const cachedBill = localStorage.getItem(`cached_bill_${tableId}`);
+        if (cachedBill) {
+            try {
+                setBillOrder(JSON.parse(cachedBill));
+            } catch (e) {
+                console.error('Bill cache parsing error', e);
+            }
+        }
+
         // 3. Fetch Menu Items
         fetchMenu();
 
@@ -98,8 +122,7 @@ const CustomerDashboard = () => {
         if (tableId) {
             API.get(`/orders/active/${tableId}`)
                 .then((res) => {
-                    const rawData = res.data;
-                    const ordersList = Array.isArray(rawData) ? rawData : (rawData ? [rawData] : []);
+                    const ordersList = normalizeOrders(res.data); // ✅ FIX 2
                     setActiveOrders(ordersList);
                     localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(ordersList));
                 })
@@ -123,6 +146,15 @@ const CustomerDashboard = () => {
 
                         let updatedList;
                         if (data.status === 'SERVED' || data.status === 'CANCELLED') {
+                            // ✅ FIX 1: SERVED hole muchhe fela-r age bill-er jonno save kore rakho
+                            if (data.status === 'SERVED') {
+                                const served = prev.find((o) => String(o.id) === String(targetId));
+                                if (served) {
+                                    const billData = { ...served, status: 'SERVED' };
+                                    setBillOrder(billData);
+                                    localStorage.setItem(`cached_bill_${tableId}`, JSON.stringify(billData));
+                                }
+                            }
                             updatedList = prev.filter((o) => String(o.id) !== String(targetId));
                         } else if (exists) {
                             updatedList = prev.map((o) =>
@@ -160,10 +192,12 @@ const CustomerDashboard = () => {
             const handleTableCleared = () => {
                 localStorage.removeItem(`customer_table_${tableId}`);
                 localStorage.removeItem(`cached_orders_${tableId}`);
+                localStorage.removeItem(`cached_bill_${tableId}`); // ✅ bill cache o clear
                 setCustomerInfo({ name: '', phone: '' });
                 setCart([]);
                 setIsCartOpen(false);
                 setActiveOrders([]);
+                setBillOrder(null); // ✅
                 setShowLoginModal(true);
                 alert('⚠️ Apnar table session-ti Admin dwara clear kora hoyeche!');
             };
@@ -316,7 +350,7 @@ const CustomerDashboard = () => {
 
             // Refresh Active Orders
             const updatedRes = await API.get(`/orders/active/${tableId}`);
-            const updatedData = Array.isArray(updatedRes.data) ? updatedRes.data : [updatedRes.data];
+            const updatedData = normalizeOrders(updatedRes.data); // ✅ FIX 2
 
             setActiveOrders(updatedData);
             localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedData));
@@ -332,6 +366,41 @@ const CustomerDashboard = () => {
         }
     };
 
+    // ❌ Order Cancel (shudhu PENDING thakle)
+    const handleCancelOrder = async (order) => {
+        if (!order || cancellingId) return;
+
+        if (order.status !== 'PENDING') {
+            alert('Ranna shuru hoye geche, ekhon cancel kora jabe na. Waiter-ke bolun.');
+            return;
+        }
+
+        if (!window.confirm(`Order #${order.id} ki shotti cancel korben?`)) return;
+
+        setCancellingId(order.id);
+        try {
+            await API.patch(`/orders/${order.id}/cancel`);
+
+            setActiveOrders((prev) => {
+                const updated = prev.filter((o) => String(o.id) !== String(order.id));
+                localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updated));
+                return updated;
+            });
+            setSelectedOrderDetails(null);
+            alert('Order cancel kora hoyeche.');
+        } catch (err) {
+            console.error('Cancel Order Error:', err);
+            alert(err.response?.data?.message || 'Order cancel korte shomossha hochhe.');
+        } finally {
+            setCancellingId(null);
+        }
+    };
+
+    // Details modal khola thakle live status dekhar jonno
+    const detailsLive = selectedOrderDetails
+        ? activeOrders.find((o) => String(o.id) === String(selectedOrderDetails.id)) || selectedOrderDetails
+        : null;
+
     const categoryNames = ['ALL', ...categories.map((c) => c.name)];
 
     // ⚡ Selected category jodi menu theke chole jay, ALL e fire jao
@@ -340,6 +409,9 @@ const CustomerDashboard = () => {
             setSelectedCategory('ALL');
         }
     }, [categories, selectedCategory]);
+
+    // ✅ Bill-e kon order jabe: cholchhe emon order thakle seta, na thakle shesh SERVED order
+    const billOrders = activeOrders.length > 0 ? activeOrders : (billOrder ? [billOrder] : []);
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 font-sans select-none flex flex-col antialiased pb-28">
@@ -384,52 +456,14 @@ const CustomerDashboard = () => {
                     </div>
                 </div>
 
+                {/* 4. CUSTOMER BILL MODAL */}
+                <CustomerBillModal orders={billOrders} />
+
                 {/* 4. ORDER TRACKER BANNER (Supports Multiple Active Orders Array) */}
                 <OrderTrackerBanner
                     activeOrders={activeOrders}
                     onViewDetails={(order) => setSelectedOrderDetails(order)}
                 />
-
-                {/* VIEW ORDER DETAILS MODAL */}
-                {selectedOrderDetails && (
-                    <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-                        <div className="bg-slate-900 border border-slate-800 w-full max-w-md rounded-3xl p-6 shadow-2xl space-y-4 relative">
-                            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-                                <div>
-                                    <h3 className="text-base font-bold text-white flex items-center gap-2">
-                                        <Utensils size={18} className="text-orange-500" /> Order #{selectedOrderDetails.id} Details
-                                    </h3>
-                                    <p className="text-[10px] text-slate-400 mt-0.5">
-                                        Status: <span className="text-orange-400 font-bold uppercase">{selectedOrderDetails.status}</span>
-                                    </p>
-                                </div>
-                                <button
-                                    onClick={() => setSelectedOrderDetails(null)}
-                                    className="text-slate-400 hover:text-white p-1 rounded-lg"
-                                >
-                                    <X size={20} />
-                                </button>
-                            </div>
-
-                            <div className="space-y-3 max-h-60 overflow-y-auto pr-1">
-                                {selectedOrderDetails.items?.map((item) => (
-                                    <div key={item.id || item.menuItemId} className="bg-slate-800/60 border border-slate-700/60 rounded-2xl p-3 flex justify-between items-center">
-                                        <div>
-                                            <h4 className="font-bold text-slate-100 text-sm">{item.name}</h4>
-                                            <p className="text-xs text-slate-400 mt-0.5">৳{item.unitPrice || item.price} × {item.quantity}</p>
-                                        </div>
-                                        <span className="font-extrabold text-orange-400 text-sm">৳{(item.unitPrice || item.price) * item.quantity}</span>
-                                    </div>
-                                ))}
-                            </div>
-
-                            <div className="border-t border-slate-800 pt-3 flex justify-between items-center text-sm font-bold">
-                                <span className="text-slate-400">Total Bill:</span>
-                                <span className="text-orange-400 text-base font-black">৳{selectedOrderDetails.totalAmount}</span>
-                            </div>
-                        </div>
-                    </div>
-                )}
 
                 {/* 5. SEARCH & CATEGORY FILTER */}
                 <div className="space-y-3">
