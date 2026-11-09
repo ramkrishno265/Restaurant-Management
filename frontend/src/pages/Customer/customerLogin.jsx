@@ -75,12 +75,12 @@ const CustomerLoginModal = ({ tableId, isOpen, onSuccess }) => {
         <form onSubmit={handleSaveCustomerInfo} className="space-y-4">
           <div>
             <label className="text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <User size={14} className="text-orange-400" /> আপনার নাম
+              <User size={14} className="text-orange-400" /> Your Name
             </label>
             <input
               type="text"
               required
-              placeholder="যেমন: তানভীর আহমেদ"
+              placeholder="Please Enter Your Name"
               value={customerInfo.name}
               onChange={(e) => setCustomerInfo({ ...customerInfo, name: e.target.value })}
               className="w-full bg-slate-800/90 border border-slate-700/80 rounded-2xl px-4 py-3.5 text-base text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition"
@@ -89,12 +89,12 @@ const CustomerLoginModal = ({ tableId, isOpen, onSuccess }) => {
 
           <div>
             <label className="text-xs font-semibold text-slate-300 mb-1.5 flex items-center gap-1.5">
-              <Phone size={14} className="text-orange-400" /> মোবাইলddd নম্বর
+              <Phone size={14} className="text-orange-400" /> Mobile Number
             </label>
             <input
               type="tel"
               required
-              placeholder="017XXXXXXXX"
+              placeholder="Enter Your Mobile Number"
               value={customerInfo.phone}
               onChange={(e) => setCustomerInfo({ ...customerInfo, phone: e.target.value })}
               className="w-full bg-slate-800/90 border border-slate-700/80 rounded-2xl px-4 py-3.5 text-base text-white placeholder-slate-500 focus:outline-none focus:border-orange-500 transition"

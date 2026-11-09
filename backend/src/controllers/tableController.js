@@ -13,20 +13,41 @@ exports.getTables = async (req, res) => {
 };
 
 // 2. Create new table
+
 exports.createTable = async (req, res) => {
   try {
     const { tableNumber, capacity } = req.body;
-    const newTable = await prisma.table.create({
-      data: { 
-        tableNumber: String(tableNumber), 
-        capacity: Number(capacity) || 4 
+
+    // Check whether table already exists
+    const existingTable = await prisma.table.findUnique({
+      where: {
+        tableNumber: String(tableNumber)
       }
     });
+
+    if (existingTable) {
+      return res.status(409).json({
+        message: 'This table is already created.'
+      });
+    }
+
+    // Create new table
+    const newTable = await prisma.table.create({
+      data: {
+        tableNumber: String(tableNumber),
+        capacity: Number(capacity)
+      }
+    });
+
     res.status(201).json(newTable);
+
   } catch (error) {
-    res.status(500).json({ error: 'Failed to create table' });
+    res.status(500).json({
+      message: 'Failed to create table.'
+    });
   }
 };
+
 
 // 3. Delete table
 exports.deleteTable = async (req, res) => {

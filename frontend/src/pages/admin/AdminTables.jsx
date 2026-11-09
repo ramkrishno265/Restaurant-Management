@@ -70,34 +70,42 @@ const AdminTables = () => {
   };
 
   // Add New Table Handler
-  const handleAddTable = async (e) => {
-    e.preventDefault();
-    if (!newTableNumber) return;
+  
+const handleAddTable = async (e) => {
+  e.preventDefault();
 
-    try {
-      const payload = {
-        tableNumber: newTableNumber,
-        capacity: parseInt(newCapacity),
-      };
-      
-      const res = await API.post('/tables', payload);
-      setTables((prev) => [...prev, res.data]);
-    } catch (err) {
-      const newTableObj = {
-        id: Date.now().toString(),
-        tableNumber: newTableNumber,
-        capacity: parseInt(newCapacity),
-        isOccupied: false,
-        currentCustomerName: null,
-        currentCustomerPhone: null,
-      };
-      setTables((prev) => [...prev, newTableObj]);
-    }
+  if (!newTableNumber) return;
+
+  try {
+    const payload = {
+      tableNumber: newTableNumber,
+      capacity: parseInt(newCapacity),
+    };
+
+    const res = await API.post('/tables', payload);
+
+    setTables((prev) => [...prev, res.data]);
+
+    alert("Table created successfully!");
 
     setNewTableNumber('');
     setNewCapacity('4');
     setIsModalOpen(false);
-  };
+
+  } catch (err) {
+
+    if (err.response?.status === 409) {
+      alert("This table is already created.");
+      return;
+    }
+
+    alert(
+      err.response?.data?.message ||
+      "Failed to create table!"
+    );
+  }
+};
+
 
   // Clear Table Handler (Admin)
   const handleClearTable = async (tableId) => {

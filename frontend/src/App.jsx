@@ -19,7 +19,7 @@ function App() {
       <Router>
         <Routes>
           {/* ১. হোমপেজে ঢুকলে টেবিলে রিডাইরেক্ট হবে */}
-          <Route path="/" element={<Navigate to="/table/1" replace />} />
+          <Route path="/" element={<Navigate to="/admin" replace />} />
 
           {/* ২. টেবিলে QR কোড স্ক্যান করে আসার রাউট (এটি মিসিং ছিল) */}
           <Route path="/table/:tableId" element={<CustomerDashboard />} />
