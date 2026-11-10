@@ -47,7 +47,6 @@ exports.createOrder = async (req, res) => {
       },
     });
 
-    // PENDING অর্ডার থাকলে আগের অর্ডারে যোগ হবে, কিন্তু COOKING/READY থাকলে নতুন Sub-Order ক্রিয়েট হবে
     if (existingPendingOrder) {
       return exports.updateOrderItems(
         { params: { id: existingPendingOrder.id }, body: { items, totalAmount } },
@@ -152,7 +151,7 @@ exports.updateOrderItems = async (req, res) => {
   }
 };
 
-// ৩. Get Active Orders for Specific Table (⚡ একাধিক সক্রিয় অর্ডার Array রেসপন্স)
+// ৩. Get Active Orders for Specific Table
 exports.getActiveCustomerOrder = async (req, res) => {
   try {
     const { tableId } = req.params;
@@ -170,7 +169,6 @@ exports.getActiveCustomerOrder = async (req, res) => {
       return res.json([]);
     }
 
-    // findFirst-এর বদলে findMany দিয়ে একটি টেবিলের সকল রানিং অর্ডার ফেচ করা
     const activeOrders = await prisma.order.findMany({
       where: {
         tableId: targetTable.id,
@@ -192,7 +190,7 @@ exports.getActiveCustomerOrder = async (req, res) => {
       items: order.orderItems.map((item) => ({
         id: item.id,
         menuItemId: item.menuItemId,
-        name: item.menuItem.name,
+        name: item.menuItem?.name || 'Item',
         quantity: item.quantity,
         unitPrice: Number(item.unitPrice),
         price: Number(item.unitPrice),
@@ -226,7 +224,7 @@ exports.getActiveOrders = async (req, res) => {
 
 exports.getOrders = exports.getActiveOrders;
 
-// ৫. Update Order Status (Safe Table Number Fetching)
+// ৫. Update Order Status
 exports.updateOrderStatus = async (req, res) => {
   try {
     const { id, orderId } = req.params;
@@ -263,8 +261,6 @@ exports.updateOrderStatus = async (req, res) => {
         estimatedMinutes: updatedOrder.estimatedMinutes,
         cookingStartedAt: updatedOrder.cookingStartedAt,
       };
-
-      console.log(`📡 Emitting Order Update to table_${tableNumber} & table_${updatedOrder.tableId}:`, payload);
 
       io.to('kitchen')
         .to('admin')
@@ -313,5 +309,90 @@ exports.cancelOrder = async (req, res) => {
   } catch (error) {
     console.error('Error cancelling order:', error);
     return res.status(500).json({ error: 'Failed to cancel order' });
+  }
+};
+
+// ⚡ ৭. Single Item Remove Handler (সম্পূর্ণ সমাধানকৃত)
+exports.removeItemFromOrder = async (req, res) => {
+  try {
+    const { orderId, itemId } = req.params;
+
+    const order = await prisma.order.findUnique({
+      where: { id: Number(orderId) },
+      include: {
+        table: true,
+        orderItems: true,
+      },
+    });
+
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+    if (order.status !== 'PENDING') {
+      return res.status(400).json({ success: false, message: 'Ranna shuru hoye geche, item bad dewa jabe na.' });
+    }
+
+    const targetItem = order.orderItems.find(
+      (i) => String(i.id) === String(itemId) || String(i.menuItemId) === String(itemId)
+    );
+    if (!targetItem) return res.status(404).json({ success: false, message: 'Item not found in order' });
+
+    const tableNumber = order.table?.tableNumber || String(order.tableId);
+
+    // ১টি আইটেম থাকলে পুরো অর্ডার ক্যানসেল
+    if (order.orderItems.length === 1) {
+      await prisma.order.update({
+        where: { id: Number(orderId) },
+        data: { status: 'CANCELLED' },
+      });
+
+      const io = getIO();
+      if (io) {
+        const payload = {
+          orderId: Number(orderId),
+          id: Number(orderId),
+          tableId: order.tableId,
+          tableNumber: tableNumber,
+          status: 'CANCELLED',
+        };
+
+        io.to('kitchen')
+          .to('admin')
+          .to(`table_${tableNumber}`)
+          .to(`table_${order.tableId}`)
+          .emit('order_status_updated', payload);
+      }
+
+      return res.status(200).json({ success: true, orderCancelled: true, message: 'Order cancelled as last item was removed' });
+    }
+
+    // আইটেম মুছে ফেলা
+    await prisma.orderItem.delete({
+      where: { id: targetItem.id },
+    });
+
+    const remainingItems = order.orderItems.filter((i) => i.id !== targetItem.id);
+    const newTotal = remainingItems.reduce((acc, item) => acc + Number(item.unitPrice) * item.quantity, 0);
+
+    const updatedOrder = await prisma.order.update({
+      where: { id: Number(orderId) },
+      data: { totalAmount: newTotal },
+      include: {
+        table: true,
+        orderItems: { include: { menuItem: true } },
+      },
+    });
+
+    const io = getIO();
+    if (io) {
+      io.to('kitchen')
+        .to('admin')
+        .to(`table_${tableNumber}`)
+        .to(`table_${order.tableId}`)
+        .emit('new_order', updatedOrder);
+    }
+
+    return res.status(200).json({ success: true, order: updatedOrder });
+  } catch (error) {
+    console.error('Remove Item Error:', error);
+    return res.status(500).json({ success: false, message: 'Failed to remove item' });
   }
 };

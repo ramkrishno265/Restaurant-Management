@@ -108,28 +108,25 @@ const handleAddTable = async (e) => {
 
 
   // Clear Table Handler (Admin)
-  const handleClearTable = async (tableId) => {
-    if (!window.confirm('আপনি কি এই কাস্টমারকে টেবিল থেকে সরিয়ে টেবিলটি ফাঁকা করতে চান?')) return;
+const handleClearTable = async (tableId) => {
+  if (!window.confirm('আপনি কি এই কাস্টমারকে টেবিল থেকে সরিয়ে টেবিলটি ফাঁকা করতে চান?')) return;
 
-    try {
-      await API.patch(`/tables/${tableId}/clear`);
+  try {
+    const res = await API.patch(`/tables/${tableId}/clear`);
+    if (res.data.success) {
       setTables((prev) =>
         prev.map((t) =>
           t.id === tableId
-            ? { ...t, isOccupied: false, currentCustomerName: null, currentCustomerPhone: null }
-            : t
-        )
-      );
-    } catch (err) {
-      setTables((prev) =>
-        prev.map((t) =>
-          t.id === tableId
-            ? { ...t, isOccupied: false, currentCustomerName: null, currentCustomerPhone: null }
+            ? { ...t, isOccupied: false, currentCustomerName: null, currentCustomerPhone: null, sessionToken: null }
             : t
         )
       );
     }
-  };
+  } catch (err) {
+    console.error('Clear table failed:', err);
+    alert('টেবিল ফাঁকা করতে সমস্যা হয়েছে। আবার চেষ্টা করুন।');
+  }
+};
 
   // Delete Table Handler
   const handleDeleteTable = async (id) => {

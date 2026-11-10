@@ -130,20 +130,18 @@ const OrderStepper = ({ status }) => {
                     <React.Fragment key={step.key}>
                         <div className="flex flex-col items-center gap-1.5 w-12 shrink-0" role="listitem">
                             <div
-                                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors duration-300 ${
-                                    done
+                                className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors duration-300 ${done
                                         ? accent === 'emerald'
                                             ? 'bg-emerald-500/15 border-emerald-500 text-emerald-400'
                                             : 'bg-orange-500/15 border-orange-500 text-orange-400'
                                         : 'bg-slate-900 border-slate-700 text-slate-600'
-                                } ${active && !isServed ? 'ring-4 ring-orange-500/20' : ''}`}
+                                    } ${active && !isServed ? 'ring-4 ring-orange-500/20' : ''}`}
                             >
                                 <Icon size={14} />
                             </div>
                             <span
-                                className={`text-[10px] font-bold ${
-                                    done ? (accent === 'emerald' ? 'text-emerald-400' : 'text-orange-400') : 'text-slate-600'
-                                }`}
+                                className={`text-[10px] font-bold ${done ? (accent === 'emerald' ? 'text-emerald-400' : 'text-orange-400') : 'text-slate-600'
+                                    }`}
                             >
                                 {step.label}
                             </span>
@@ -151,13 +149,12 @@ const OrderStepper = ({ status }) => {
 
                         {index < STEPS.length - 1 && (
                             <div
-                                className={`flex-1 h-0.5 mt-4 rounded-full transition-colors duration-300 ${
-                                    currentIndex > index
+                                className={`flex-1 h-0.5 mt-4 rounded-full transition-colors duration-300 ${currentIndex > index
                                         ? isServed
                                             ? 'bg-emerald-500'
                                             : 'bg-orange-500'
                                         : 'bg-slate-800'
-                                }`}
+                                    }`}
                             />
                         )}
                     </React.Fragment>
@@ -183,12 +180,9 @@ const SingleOrderItem = ({ activeOrder, onCancelOrder, onRemoveItem, removingKey
 
     const now = useNow(isCooking ? 1000 : 30000);
 
-    // cookingStartedAt na thakle prothom je somoy cooking dekha gelo seta dhore nao
-    // (age: protibar effect cholle timer reset hoye jeto)
     const fallbackStartRef = useRef(null);
     if (isCooking && fallbackStartRef.current === null) fallbackStartRef.current = Date.now();
 
-    // Status PENDING theke bodle gele cancel confirm bondho
     useEffect(() => {
         if (status !== 'PENDING') {
             setConfirmingCancel(false);
@@ -196,7 +190,6 @@ const SingleOrderItem = ({ activeOrder, onCancelOrder, onRemoveItem, removingKey
         }
     }, [status]);
 
-    // Cooking timer hishab
     let timer = null;
     if (isCooking) {
         const startMs = parseTime(activeOrder.cookingStartedAt) ?? fallbackStartRef.current ?? now;
@@ -219,7 +212,9 @@ const SingleOrderItem = ({ activeOrder, onCancelOrder, onRemoveItem, removingKey
     const placedAt = parseTime(activeOrder.createdAt);
 
     const handleRemoveItem = async (item) => {
-        await onRemoveItem(activeOrder, item);
+        if (typeof onRemoveItem === 'function') {
+            await onRemoveItem(activeOrder, item);
+        }
         setConfirmItemKey(null);
     };
 
@@ -269,11 +264,10 @@ const SingleOrderItem = ({ activeOrder, onCancelOrder, onRemoveItem, removingKey
                     </div>
                     <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden">
                         <div
-                            className={`h-full transition-all duration-500 ${
-                                timer.isOverdue
+                            className={`h-full transition-all duration-500 ${timer.isOverdue
                                     ? 'bg-amber-400 animate-pulse'
                                     : 'bg-gradient-to-r from-orange-500 to-amber-400'
-                            }`}
+                                }`}
                             style={{ width: `${timer.progress}%` }}
                         />
                     </div>
@@ -438,7 +432,6 @@ const OrderTrackerBanner = ({
     const pendingTotal = pendingOrders.reduce((sum, o) => sum + calcOrderTotal(o), 0);
     const canCancelAll = typeof onCancelAll === 'function' && pendingOrders.length >= 2;
 
-    // Pending 2 ti-r kom hoye gele "sob cancel" confirm bondho
     useEffect(() => {
         if (!canCancelAll) setConfirmingAll(false);
     }, [canCancelAll]);

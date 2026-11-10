@@ -5,7 +5,7 @@ let io;
 const initSocket = (server) => {
     io = new Server(server, {
         cors: {
-            origin: "*", // বা আপনার ফ্রন্টএন্ড URL যেমন "http://localhost:5173"
+            origin: "*",
             methods: ["GET", "POST", "PATCH"],
             credentials: true
         },
@@ -20,7 +20,14 @@ const initSocket = (server) => {
             console.log(`📌 Admin joined room: admin`);
         });
 
+        // 👈 ১. join_table ইভেন্ট
         socket.on('join_table', (room) => {
+            socket.join(room);
+            console.log(`📌 Client joined room: ${room}`);
+        });
+
+        // 👈 ২. join_room ইভেন্টও যোগ করা হলো (ফ্লেক্সিবিলিটির জন্য)
+        socket.on('join_room', (room) => {
             socket.join(room);
             console.log(`📌 Client joined room: ${room}`);
         });

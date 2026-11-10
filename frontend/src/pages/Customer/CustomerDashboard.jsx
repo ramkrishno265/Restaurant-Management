@@ -19,7 +19,6 @@ import {
     X
 } from 'lucide-react';
 
-// ✅ FIX 2: API response e { success, data: [...] } ba shudhu [...] - duto shapei kaj korbe
 const normalizeOrders = (resData) => {
     const raw = resData?.data ?? resData;
     if (Array.isArray(raw)) return raw;
@@ -47,12 +46,24 @@ const CustomerDashboard = () => {
     const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [cancellingId, setCancellingId] = useState(null);
-
-    // ✅ FIX 1: SERVED hoye gele order activeOrders theke soriye jay,
-    // tai bill-er jonno shesh SERVED order alada rakha hocche
     const [billOrder, setBillOrder] = useState(null);
 
-    // ⚡ Menu fetch (alada function, jate socket event e abar call kora jay)
+    // ⚡ সেশন ক্লিয়ার/লগআউট করার মূল হেল্পার ফাংশন
+    const handleForceLogout = useCallback(() => {
+        localStorage.removeItem(`customer_table_${tableId}`);
+        localStorage.removeItem(`table_token_${tableId}`);
+        localStorage.removeItem(`cached_orders_${tableId}`);
+        localStorage.removeItem(`cached_bill_${tableId}`);
+
+        setCustomerInfo({ name: '', phone: '' });
+        setCart([]);
+        setIsCartOpen(false);
+        setActiveOrders([]);
+        setBillOrder(null);
+        setShowLoginModal(true);
+    }, [tableId]);
+
+    // ⚡ Menu fetch
     const fetchMenu = useCallback(() => {
         API.get('/menu')
             .then((res) => {
@@ -67,7 +78,6 @@ const CustomerDashboard = () => {
 
                     setCategories(categoryData);
 
-                    // ⚡ Cart e thaka kono item jodi ar available na thake, cart theke soriye dao
                     const availableIds = new Set(
                         categoryData.flatMap((cat) => cat.menuItems.map((i) => String(i.id)))
                     );
@@ -81,20 +91,35 @@ const CustomerDashboard = () => {
     }, []);
 
     useEffect(() => {
-        // 1. Storage Check Customer Info
+        // ১. সেশন টোকেন ভ্যালিডেশন (ডাটাবেজের সাথে মেলানো)
+        const savedToken = localStorage.getItem(`table_token_${tableId}`);
         const savedCustomer = localStorage.getItem(`customer_table_${tableId}`);
-        if (savedCustomer) {
-            try {
-                setCustomerInfo(JSON.parse(savedCustomer));
-                setShowLoginModal(false);
-            } catch (e) {
-                setShowLoginModal(true);
-            }
+
+        if (savedToken && savedCustomer) {
+            API.get(`/tables/${tableId}/verify`, {
+                headers: { 'x-table-token': savedToken }
+            })
+                .then((res) => {
+                    if (res.data?.isValid) {
+                        try {
+                            setCustomerInfo(JSON.parse(savedCustomer));
+                            setShowLoginModal(false);
+                        } catch (e) {
+                            handleForceLogout();
+                        }
+                    } else {
+                        handleForceLogout();
+                    }
+                })
+                .catch(() => {
+                    // টোকেন ভুল বা এডমিন ক্লিয়ার করে দিলে অটো লগআউট
+                    handleForceLogout();
+                });
         } else {
-            setShowLoginModal(true);
+            handleForceLogout();
         }
 
-        // 2. Instant Local Cache Load
+        // ২. Local Cache Load
         const cachedOrders = localStorage.getItem(`cached_orders_${tableId}`);
         if (cachedOrders) {
             try {
@@ -105,7 +130,6 @@ const CustomerDashboard = () => {
             }
         }
 
-        // ✅ Shesh SERVED bill cache load (page refresh dileo bill thakbe)
         const cachedBill = localStorage.getItem(`cached_bill_${tableId}`);
         if (cachedBill) {
             try {
@@ -115,38 +139,34 @@ const CustomerDashboard = () => {
             }
         }
 
-        // 3. Fetch Menu Items
+        // ৩. Fetch Menu Items
         fetchMenu();
 
-        // 4. Initial Active Orders Fetch
+        // ৪. Initial Active Orders Fetch
         if (tableId) {
             API.get(`/orders/active/${tableId}`)
                 .then((res) => {
-                    const ordersList = normalizeOrders(res.data); // ✅ FIX 2
+                    const ordersList = normalizeOrders(res.data);
                     setActiveOrders(ordersList);
                     localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(ordersList));
                 })
                 .catch((err) => console.error('Fetch Active Orders Error:', err));
         }
 
-        // 5. Socket Listener Configuration
+        // ৫. Socket Listener Configuration
         if (socket && tableId) {
+            // ⚡ FIX 1: ব্যাকএন্ড সকেট সার্ভারের সঙ্গে মিলিয়ে 'join_table' কল করা
             socket.emit('join_table', `table_${String(tableId)}`);
 
             const handleStatusUpdate = (data) => {
-                console.log('⚡ Live Socket Data Received:', data);
-
                 const incomingTable = String(data.tableNumber || data.tableId || data.table?.tableNumber || data.table?.id);
-                const currentTable = String(tableId);
-
-                if (incomingTable === currentTable) {
+                if (incomingTable === String(tableId)) {
                     setActiveOrders((prev) => {
                         const targetId = data.orderId || data.id;
                         const exists = prev.some((o) => String(o.id) === String(targetId));
 
                         let updatedList;
                         if (data.status === 'SERVED' || data.status === 'CANCELLED') {
-                            // ✅ FIX 1: SERVED hole muchhe fela-r age bill-er jonno save kore rakho
                             if (data.status === 'SERVED') {
                                 const served = prev.find((o) => String(o.id) === String(targetId));
                                 if (served) {
@@ -189,22 +209,14 @@ const CustomerDashboard = () => {
                 }
             };
 
+            // ⚡ FIX 2: এডমিন ক্লিয়ার করলে ইনস্ট্যান্ট সকেট লগআউট
             const handleTableCleared = () => {
-                localStorage.removeItem(`customer_table_${tableId}`);
-                localStorage.removeItem(`cached_orders_${tableId}`);
-                localStorage.removeItem(`cached_bill_${tableId}`); // ✅ bill cache o clear
-                setCustomerInfo({ name: '', phone: '' });
-                setCart([]);
-                setIsCartOpen(false);
-                setActiveOrders([]);
-                setBillOrder(null); // ✅
-                setShowLoginModal(true);
-                alert('⚠️ Apnar table session-ti Admin dwara clear kora hoyeche!');
+                console.log('⚡ Table cleared event received live!');
+                handleForceLogout();
+                alert('⚠️ আপনার টেবিল সেশনটি Admin কর্তৃক ক্লিয়ার করা হয়েছে!');
             };
 
-            // ⚡ Admin menu change korle live menu refresh
             const handleMenuUpdated = (data) => {
-                console.log('⚡ menu_updated received:', data);
                 if (data?.id && data.isAvailable === false) {
                     setCart((prev) => prev.filter((i) => String(i.id) !== String(data.id)));
                 }
@@ -228,7 +240,7 @@ const CustomerDashboard = () => {
                 socket.off('menu_updated', handleMenuUpdated);
             };
         }
-    }, [socket, tableId, fetchMenu]);
+    }, [socket, tableId, fetchMenu, handleForceLogout]);
 
     // Login Success Callback
     const handleLoginSuccess = (info) => {
@@ -281,7 +293,6 @@ const CustomerDashboard = () => {
         return item ? item.quantity : 0;
     };
 
-    // Cart khali hoye gele cart modal bondho kore dao
     useEffect(() => {
         if (cart.length === 0 && isCartOpen) setIsCartOpen(false);
     }, [cart, isCartOpen]);
@@ -348,9 +359,8 @@ const CustomerDashboard = () => {
                 await API.post('/orders', orderData);
             }
 
-            // Refresh Active Orders
             const updatedRes = await API.get(`/orders/active/${tableId}`);
-            const updatedData = normalizeOrders(updatedRes.data); // ✅ FIX 2
+            const updatedData = normalizeOrders(updatedRes.data);
 
             setActiveOrders(updatedData);
             localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedData));
@@ -366,7 +376,6 @@ const CustomerDashboard = () => {
         }
     };
 
-    // ❌ Order Cancel (shudhu PENDING thakle)
     const handleCancelOrder = async (order) => {
         if (!order || cancellingId) return;
 
@@ -396,22 +405,55 @@ const CustomerDashboard = () => {
         }
     };
 
-    // Details modal khola thakle live status dekhar jonno
-    const detailsLive = selectedOrderDetails
-        ? activeOrders.find((o) => String(o.id) === String(selectedOrderDetails.id)) || selectedOrderDetails
-        : null;
-
     const categoryNames = ['ALL', ...categories.map((c) => c.name)];
 
-    // ⚡ Selected category jodi menu theke chole jay, ALL e fire jao
     useEffect(() => {
         if (selectedCategory !== 'ALL' && !categories.some((c) => c.name === selectedCategory)) {
             setSelectedCategory('ALL');
         }
     }, [categories, selectedCategory]);
 
-    // ✅ Bill-e kon order jabe: cholchhe emon order thakle seta, na thakle shesh SERVED order
     const billOrders = activeOrders.length > 0 ? activeOrders : (billOrder ? [billOrder] : []);
+
+
+
+    // state management-এর সাথে এই স্টেটটি যোগ করুন
+    const [removingKey, setRemovingKey] = useState(null);
+
+    // handleCancelOrder-এর নিচে এই ফাংশনটি বসিয়ে দিন
+    const handleRemoveItem = async (order, item) => {
+        const itemKey = String(item.menuItemId || item.id);
+        const key = `${order.id}_${itemKey}`;
+        setRemovingKey(key);
+
+        try {
+            const res = await API.delete(`/orders/${order.id}/items/${itemKey}`);
+
+            if (res.data.success) {
+                if (res.data.orderCancelled) {
+                    // শেষ আইটেম মুছে ফেললে পুরো অর্ডার স্টেট থেকে সরিয়ে ফেলা
+                    setActiveOrders((prev) => {
+                        const updated = prev.filter((o) => String(o.id) !== String(order.id));
+                        localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updated));
+                        return updated;
+                    });
+                } else {
+                    // বাকি আইটেম নিয়ে অর্ডার রিফ্রেশ
+                    const updatedRes = await API.get(`/orders/active/${tableId}`);
+                    const updatedData = normalizeOrders(updatedRes.data);
+                    setActiveOrders(updatedData);
+                    localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedData));
+                }
+            }
+        } catch (err) {
+            console.error('Remove Item Error:', err);
+            alert(err.response?.data?.message || 'Item bad dite shomossha hochhe.');
+        } finally {
+            setRemovingKey(null);
+        }
+    };
+
+
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 font-sans select-none flex flex-col antialiased pb-28">
@@ -459,10 +501,13 @@ const CustomerDashboard = () => {
                 {/* 4. CUSTOMER BILL MODAL */}
                 <CustomerBillModal orders={billOrders} />
 
-                {/* 4. ORDER TRACKER BANNER (Supports Multiple Active Orders Array) */}
+                {/* 4. ORDER TRACKER BANNER */}
                 <OrderTrackerBanner
                     activeOrders={activeOrders}
-                    onViewDetails={(order) => setSelectedOrderDetails(order)}
+                    onCancelOrder={handleCancelOrder}
+                    onRemoveItem={handleRemoveItem} // 👈 এই ফাংশনটি পাস করুন
+                    removingKey={removingKey}       // 👈 লোডিং স্টেটের জন্য
+                    cancellingId={cancellingId}
                 />
 
                 {/* 5. SEARCH & CATEGORY FILTER */}

@@ -20,18 +20,39 @@ const CustomerLoginModal = ({ tableId, isOpen, onSuccess }) => {
 
     try {
       setLoading(true);
-      const res = await API.post(`/tables/${tableId}/occupy`, {
-        name: customerInfo.name.trim(),
-        phone: customerInfo.phone.trim(),
-      });
+
+      // লোকাল স্টোরেজে পূর্বে থাকা টোকেনটি চেক করা (রিফ্রেশ হ্যান্ডেলিংয়ের জন্য)
+      const existingToken = localStorage.getItem(`table_token_${tableId}`);
+
+      const res = await API.post(
+        `/tables/${tableId}/occupy`,
+        {
+          name: customerInfo.name.trim(),
+          phone: customerInfo.phone.trim(),
+        },
+        {
+          headers: {
+            'x-table-token': existingToken || '',
+          },
+        }
+      );
 
       if (res.data.success) {
-        // LocalStorage-এ কাস্টমার সেভ করা
-        localStorage.setItem(`customer_table_${tableId}`, JSON.stringify(customerInfo));
-        
-        // Parent component-কে আপডেট জানানো
+        // ১. ব্যাকএন্ড থেকে আসা নতুন Session Token সেভ করা
+        if (res.data.token) {
+          localStorage.setItem(`table_token_${tableId}`, res.data.token);
+        }
+
+        // ২. কাস্টমারের নাম ও ফোন সেভ করা
+        const updatedCustomerData = {
+          ...customerInfo,
+          token: res.data.token || existingToken,
+        };
+        localStorage.setItem(`customer_table_${tableId}`, JSON.stringify(updatedCustomerData));
+
+        // Parent Component-এ ডেটা পাস করা
         if (onSuccess) {
-          onSuccess(customerInfo);
+          onSuccess(updatedCustomerData);
         }
       }
     } catch (err) {
@@ -59,7 +80,7 @@ const CustomerLoginModal = ({ tableId, isOpen, onSuccess }) => {
           </div>
           <h2 className="text-xl font-bold text-white tracking-wide">রেস্তোরাঁয় স্বাগতম!</h2>
           <p className="text-xs text-slate-400 mt-1">
-            টেবিল নম্বর <span className="text-orange-400 font-bold">#{tableId}</span> • খাবার অর্ডার করতে নাম ও মোবাইল নম্বর দিন
+            টেবিল নম্বর <span className="text-orange-400 font-bold">#{tableId}</span> - খাবার অর্ডার করতে নাম ও মোবাইল নম্বর দিন
           </p>
         </div>
 
