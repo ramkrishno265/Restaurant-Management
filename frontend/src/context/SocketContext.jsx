@@ -3,18 +3,15 @@ import { io } from 'socket.io-client';
 
 const SocketContext = createContext(null);
 
-// Vite / CRA ডায়নামিক URL নির্ধারণ
-const SOCKET_URL = import.meta.env.VITE_API_BASE_URL 
-  || process.env.REACT_APP_API_URL 
-  || 'http://localhost:5000';
+// Vite-এর জন্য সঠিক Environment Variable
+const SOCKET_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
 
     useEffect(() => {
-        // ⚡ Stable Connection Options with Transports Fallback
         const newSocket = io(SOCKET_URL, {
-            transports: ['websocket', 'polling'], // Polling fallback যুক্ত করা হলো
+            transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
