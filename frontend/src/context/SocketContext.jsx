@@ -3,14 +3,12 @@ import { io } from 'socket.io-client';
 
 const SocketContext = createContext(null);
 
-// Vite-এর জন্য সঠিক Environment Variable
-const SOCKET_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
-
 export const SocketProvider = ({ children }) => {
     const [socket, setSocket] = useState(null);
 
     useEffect(() => {
-        const newSocket = io(SOCKET_URL, {
+        // সরাসরি Render-এর ব্যাকএন্ড URL
+        const newSocket = io('https://restaurant-management-qjy5.onrender.com', {
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
