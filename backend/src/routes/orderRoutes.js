@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const orderController = require('../controllers/orderController');
+const billController = require('../controllers/billController');
 
 // ১. Create / Place New Order
 router.post('/', orderController.placeOrder);
@@ -22,5 +23,7 @@ router.patch('/:id/status', orderController.updateOrderStatus);
 
 // ৭. Cancel Full Order
 router.patch('/:id/cancel', orderController.cancelOrder);
+
+router.get('/bill/:tableId', billController.getCustomerBill);
 
 module.exports = router;

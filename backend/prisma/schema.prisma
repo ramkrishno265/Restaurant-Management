@@ -59,6 +59,12 @@ model Order {
   updatedAt        DateTime    @updatedAt
   customerName     String?
   customerPhone    String?
+
+  isClosed      Boolean   @default(false)
+  isPaid        Boolean   @default(false)
+  paymentMethod String?
+  paidAt        DateTime?
+  
 }
 
 // ৫. অর্ডার স্ট্যাটাস

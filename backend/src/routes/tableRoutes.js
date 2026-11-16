@@ -8,6 +8,7 @@ const {
   clearTable,
   verifySession // 👈 ১. নতুন ফাংশনটি Import করুন
 } = require('../controllers/tableController');
+const billController = require('../controllers/billController');
 
 // ১. অ্যাডমিন প্যানেলের রাউটসমূহ (Get, Create, Delete)
 router.get('/', getTables);
@@ -21,5 +22,8 @@ router.post('/:tableNumber/occupy', occupyTable);
 router.get('/:tableId/verify', verifySession); 
 
 router.patch('/:id/clear', clearTable);
+
+router.get('/:id/bill', billController.getAdminTableBill);
+router.patch('/:id/pay', billController.payTableBill);
 
 module.exports = router;

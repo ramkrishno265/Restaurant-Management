@@ -1,3 +1,4 @@
+const e = require('cors');
 const prisma = require('../config/db');
 const { getIO } = require('../config/socket');
 
@@ -396,3 +397,4 @@ exports.removeItemFromOrder = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to remove item' });
   }
 };
+

@@ -66,7 +66,7 @@ exports.occupyTable = async (req, res) => {
   try {
     const { tableNumber } = req.params;
     const { name, phone } = req.body;
-    const clientToken = req.headers['x-table-token']; 
+    const clientToken = req.headers['x-table-token'];
 
     let table = await prisma.table.findUnique({
       where: { tableNumber: String(tableNumber) },
@@ -79,11 +79,11 @@ exports.occupyTable = async (req, res) => {
     // যদি টেবিল ইতিমধ্যেই বুকড থাকে
     if (table.isOccupied) {
       if (clientToken && table.sessionToken === clientToken) {
-        return res.status(200).json({ 
-          success: true, 
-          table, 
-          token: clientToken, 
-          message: 'Session restored' 
+        return res.status(200).json({
+          success: true,
+          table,
+          token: clientToken,
+          message: 'Session restored'
         });
       }
 
@@ -115,10 +115,10 @@ exports.occupyTable = async (req, res) => {
       io.to(`table_${updatedTable.id}`).emit('table_occupied', updatedTable);
     }
 
-    return res.status(200).json({ 
-      success: true, 
-      table: updatedTable, 
-      token: newToken 
+    return res.status(200).json({
+      success: true,
+      table: updatedTable,
+      token: newToken
     });
 
   } catch (error) {
@@ -130,27 +130,31 @@ exports.occupyTable = async (req, res) => {
 // 5. Clear Table & Logout Customer (Admin)
 // 5. Clear Table & Logout Customer (Admin)
 // Clear Table Handler (Admin)
+// 5. Clear Table & Logout Customer (Admin)
 exports.clearTable = async (req, res) => {
   try {
     const { id } = req.params;
 
-    // Table update with sessionToken null
+    // 🆕 এই টেবিলের সব পুরনো অর্ডার "বন্ধ" করা
+    await prisma.order.updateMany({
+      where: { tableId: Number(id), isClosed: false },
+      data: { isClosed: true },
+    });
+
     const updatedTable = await prisma.table.update({
       where: { id: Number(id) },
       data: {
         isOccupied: false,
         currentCustomerName: null,
         currentCustomerPhone: null,
-        sessionToken: null, // 👈 সেশন টোকেন ডিলিট করা হলো
+        sessionToken: null,
       },
     });
 
     const io = getIO();
     if (io) {
-      // 1. Admin dashboard update
       io.to('admin').emit('table_updated', updatedTable);
 
-      // 2. Customer side auto logout socket events
       io.to(`table_${updatedTable.tableNumber}`).emit('table_cleared');
       io.to(`table_${updatedTable.id}`).emit('table_cleared');
       io.to(`table_${id}`).emit('table_cleared');
@@ -162,7 +166,6 @@ exports.clearTable = async (req, res) => {
     return res.status(500).json({ success: false, message: 'Failed to clear table' });
   }
 };
-
 // controllers/tableController.js
 exports.verifySession = async (req, res) => {
   try {

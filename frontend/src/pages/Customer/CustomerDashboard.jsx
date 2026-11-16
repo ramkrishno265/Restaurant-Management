@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react'; // 🆕 useMemo, useRef
 import { useParams } from 'react-router-dom';
 import { useSocket } from '../../context/SocketContext';
 import API from '../../services/api';
@@ -16,7 +16,6 @@ import {
     Search,
     CheckCircle2,
     Sparkles,
-    X
 } from 'lucide-react';
 
 const normalizeOrders = (resData) => {
@@ -43,23 +42,43 @@ const CustomerDashboard = () => {
 
     // Active Orders & Loading State
     const [activeOrders, setActiveOrders] = useState([]);
+    const [servedOrders, setServedOrders] = useState([]); // 🆕 আগের billOrder (object) এর বদলে array
     const [selectedOrderDetails, setSelectedOrderDetails] = useState(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [cancellingId, setCancellingId] = useState(null);
-    const [billOrder, setBillOrder] = useState(null);
+    const [removingKey, setRemovingKey] = useState(null);
 
-    // ⚡ সেশন ক্লিয়ার/লগআউট করার মূল হেল্পার ফাংশন
+    // 🆕 socket handler-এ সবসময় সর্বশেষ activeOrders পড়ার জন্য
+    const activeOrdersRef = useRef([]);
+    useEffect(() => {
+        activeOrdersRef.current = activeOrders;
+    }, [activeOrders]);
+
+    // 🆕 served অর্ডার জমা করার helper (duplicate হবে না)
+    const addServedOrder = useCallback(
+        (order) => {
+            setServedOrders((prev) => {
+                const next = [...prev.filter((o) => String(o.id) !== String(order.id)), order];
+                localStorage.setItem(`cached_served_${tableId}`, JSON.stringify(next));
+                return next;
+            });
+        },
+        [tableId]
+    );
+
+    // ⚡ সেশন ক্লিয়ার/লগআউট করার মূল হেল্পার ফাংশন
     const handleForceLogout = useCallback(() => {
         localStorage.removeItem(`customer_table_${tableId}`);
         localStorage.removeItem(`table_token_${tableId}`);
         localStorage.removeItem(`cached_orders_${tableId}`);
-        localStorage.removeItem(`cached_bill_${tableId}`);
+        localStorage.removeItem(`cached_served_${tableId}`); // 🆕
+        localStorage.removeItem(`cached_bill_${tableId}`); // পুরোনো key, পরিষ্কার করে দিচ্ছি
 
         setCustomerInfo({ name: '', phone: '' });
         setCart([]);
         setIsCartOpen(false);
         setActiveOrders([]);
-        setBillOrder(null);
+        setServedOrders([]); // 🆕
         setShowLoginModal(true);
     }, [tableId]);
 
@@ -130,12 +149,14 @@ const CustomerDashboard = () => {
             }
         }
 
-        const cachedBill = localStorage.getItem(`cached_bill_${tableId}`);
-        if (cachedBill) {
+        // 🆕 served orders cache load (আগের cachedBill অংশের বদলে)
+        const cachedServed = localStorage.getItem(`cached_served_${tableId}`);
+        if (cachedServed) {
             try {
-                setBillOrder(JSON.parse(cachedBill));
+                const parsed = JSON.parse(cachedServed);
+                setServedOrders(Array.isArray(parsed) ? parsed : []);
             } catch (e) {
-                console.error('Bill cache parsing error', e);
+                console.error('Served cache parsing error', e);
             }
         }
 
@@ -155,46 +176,44 @@ const CustomerDashboard = () => {
 
         // ৫. Socket Listener Configuration
         if (socket && tableId) {
-            // ⚡ FIX 1: ব্যাকএন্ড সকেট সার্ভারের সঙ্গে মিলিয়ে 'join_table' কল করা
             socket.emit('join_table', `table_${String(tableId)}`);
 
+            // 🆕 ঠিক করা handleStatusUpdate
             const handleStatusUpdate = (data) => {
                 const incomingTable = String(data.tableNumber || data.tableId || data.table?.tableNumber || data.table?.id);
-                if (incomingTable === String(tableId)) {
-                    setActiveOrders((prev) => {
-                        const targetId = data.orderId || data.id;
-                        const exists = prev.some((o) => String(o.id) === String(targetId));
+                if (incomingTable !== String(tableId)) return;
 
-                        let updatedList;
-                        if (data.status === 'SERVED' || data.status === 'CANCELLED') {
-                            if (data.status === 'SERVED') {
-                                const served = prev.find((o) => String(o.id) === String(targetId));
-                                if (served) {
-                                    const billData = { ...served, status: 'SERVED' };
-                                    setBillOrder(billData);
-                                    localStorage.setItem(`cached_bill_${tableId}`, JSON.stringify(billData));
-                                }
-                            }
-                            updatedList = prev.filter((o) => String(o.id) !== String(targetId));
-                        } else if (exists) {
-                            updatedList = prev.map((o) =>
-                                String(o.id) === String(targetId)
-                                    ? {
-                                        ...o,
-                                        status: data.status,
-                                        cookingStartedAt: data.cookingStartedAt || (data.status === 'COOKING' ? new Date().toISOString() : o.cookingStartedAt),
-                                        estimatedMinutes: data.estimatedMinutes || o.estimatedMinutes
-                                    }
-                                    : o
-                            );
-                        } else {
-                            updatedList = [...prev];
-                        }
+                const targetId = data.orderId || data.id;
 
-                        localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedList));
-                        return updatedList;
-                    });
+                // SERVED হলে অর্ডারটা ref থেকে নিয়ে servedOrders-এ জমা করি
+                // (setActiveOrders-এর ভেতরে অন্য state সেট করা হয় না)
+                if (data.status === 'SERVED') {
+                    const served = activeOrdersRef.current.find((o) => String(o.id) === String(targetId));
+                    if (served) addServedOrder({ ...served, status: 'SERVED' });
                 }
+
+                setActiveOrders((prev) => {
+                    let updatedList;
+                    if (data.status === 'SERVED' || data.status === 'CANCELLED') {
+                        updatedList = prev.filter((o) => String(o.id) !== String(targetId));
+                    } else {
+                        updatedList = prev.map((o) =>
+                            String(o.id) === String(targetId)
+                                ? {
+                                    ...o,
+                                    status: data.status,
+                                    cookingStartedAt:
+                                        data.cookingStartedAt ||
+                                        (data.status === 'COOKING' ? new Date().toISOString() : o.cookingStartedAt),
+                                    estimatedMinutes: data.estimatedMinutes || o.estimatedMinutes
+                                }
+                                : o
+                        );
+                    }
+
+                    localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updatedList));
+                    return updatedList;
+                });
             };
 
             const handleNewOrder = (newOrder) => {
@@ -202,14 +221,16 @@ const CustomerDashboard = () => {
                 if (incomingTable === String(tableId)) {
                     setActiveOrders((prev) => {
                         const exists = prev.some((o) => String(o.id) === String(newOrder.id));
-                        const updated = exists ? prev.map((o) => String(o.id) === String(newOrder.id) ? newOrder : o) : [newOrder, ...prev];
+                        const updated = exists
+                            ? prev.map((o) => (String(o.id) === String(newOrder.id) ? newOrder : o))
+                            : [newOrder, ...prev];
                         localStorage.setItem(`cached_orders_${tableId}`, JSON.stringify(updated));
                         return updated;
                     });
                 }
             };
 
-            // ⚡ FIX 2: এডমিন ক্লিয়ার করলে ইনস্ট্যান্ট সকেট লগআউট
+            // ⚡ এডমিন ক্লিয়ার করলে ইনস্ট্যান্ট সকেট লগআউট
             const handleTableCleared = () => {
                 console.log('⚡ Table cleared event received live!');
                 handleForceLogout();
@@ -240,7 +261,7 @@ const CustomerDashboard = () => {
                 socket.off('menu_updated', handleMenuUpdated);
             };
         }
-    }, [socket, tableId, fetchMenu, handleForceLogout]);
+    }, [socket, tableId, fetchMenu, handleForceLogout, addServedOrder]); // 🆕 addServedOrder
 
     // Login Success Callback
     const handleLoginSuccess = (info) => {
@@ -405,22 +426,6 @@ const CustomerDashboard = () => {
         }
     };
 
-    const categoryNames = ['ALL', ...categories.map((c) => c.name)];
-
-    useEffect(() => {
-        if (selectedCategory !== 'ALL' && !categories.some((c) => c.name === selectedCategory)) {
-            setSelectedCategory('ALL');
-        }
-    }, [categories, selectedCategory]);
-
-    const billOrders = activeOrders.length > 0 ? activeOrders : (billOrder ? [billOrder] : []);
-
-
-
-    // state management-এর সাথে এই স্টেটটি যোগ করুন
-    const [removingKey, setRemovingKey] = useState(null);
-
-    // handleCancelOrder-এর নিচে এই ফাংশনটি বসিয়ে দিন
     const handleRemoveItem = async (order, item) => {
         const itemKey = String(item.menuItemId || item.id);
         const key = `${order.id}_${itemKey}`;
@@ -438,7 +443,7 @@ const CustomerDashboard = () => {
                         return updated;
                     });
                 } else {
-                    // বাকি আইটেম নিয়ে অর্ডার রিফ্রেশ
+                    // বাকি আইটেম নিয়ে অর্ডার রিফ্রেশ
                     const updatedRes = await API.get(`/orders/active/${tableId}`);
                     const updatedData = normalizeOrders(updatedRes.data);
                     setActiveOrders(updatedData);
@@ -453,7 +458,21 @@ const CustomerDashboard = () => {
         }
     };
 
+    const categoryNames = ['ALL', ...categories.map((c) => c.name)];
 
+    useEffect(() => {
+        if (selectedCategory !== 'ALL' && !categories.some((c) => c.name === selectedCategory)) {
+            setSelectedCategory('ALL');
+        }
+    }, [categories, selectedCategory]);
+
+    // 🆕 served + active দুটোই merge (একই id হলে active-এর নতুন data জেতে)
+    const billOrders = useMemo(() => {
+        const map = new Map();
+        servedOrders.forEach((o) => map.set(String(o.id), o));
+        activeOrders.forEach((o) => map.set(String(o.id), o));
+        return Array.from(map.values());
+    }, [servedOrders, activeOrders]);
 
     return (
         <div className="min-h-screen bg-slate-950 text-slate-100 font-sans select-none flex flex-col antialiased pb-28">
@@ -501,16 +520,16 @@ const CustomerDashboard = () => {
                 {/* 4. CUSTOMER BILL MODAL */}
                 <CustomerBillModal orders={billOrders} />
 
-                {/* 4. ORDER TRACKER BANNER */}
+                {/* 5. ORDER TRACKER BANNER */}
                 <OrderTrackerBanner
                     activeOrders={activeOrders}
                     onCancelOrder={handleCancelOrder}
-                    onRemoveItem={handleRemoveItem} // 👈 এই ফাংশনটি পাস করুন
-                    removingKey={removingKey}       // 👈 লোডিং স্টেটের জন্য
+                    onRemoveItem={handleRemoveItem}
+                    removingKey={removingKey}
                     cancellingId={cancellingId}
                 />
 
-                {/* 5. SEARCH & CATEGORY FILTER */}
+                {/* 6. SEARCH & CATEGORY FILTER */}
                 <div className="space-y-3">
                     <div className="relative">
                         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -539,7 +558,7 @@ const CustomerDashboard = () => {
                     </div>
                 </div>
 
-                {/* 6. MENU ITEMS LIST */}
+                {/* 7. MENU ITEMS LIST */}
                 <div className="space-y-6">
                     {categories.length === 0 ? (
                         <p className="text-center py-12 text-slate-500 text-xs">Kono menu item pawa jayni.</p>
@@ -627,7 +646,7 @@ const CustomerDashboard = () => {
                 </div>
             </main>
 
-            {/* 7. FLOATING BOTTOM CART BUTTON */}
+            {/* 8. FLOATING BOTTOM CART BUTTON */}
             {cart.length > 0 && (
                 <div className="fixed bottom-4 left-1/2 -translate-x-1/2 w-[92%] max-w-sm z-40">
                     <button
@@ -645,7 +664,7 @@ const CustomerDashboard = () => {
                 </div>
             )}
 
-            {/* 8. BOTTOM SHEET CART MODAL */}
+            {/* 9. BOTTOM SHEET CART MODAL */}
             {isCartOpen && (
                 <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm flex items-end justify-center z-50">
                     <div className="bg-slate-900 border-t border-slate-800 w-full max-w-md rounded-t-3xl p-6 space-y-4 max-h-[85vh] overflow-y-auto animate-in slide-in-from-bottom duration-250">
