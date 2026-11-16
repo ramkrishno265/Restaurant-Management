@@ -6,6 +6,7 @@ import CustomerLoginModal from '../Customer/customerLogin';
 import CustomerMenuBar from '../../components/CustomerMenuBar';
 import OrderTrackerBanner from './CutomerComponent/OrderTrackerBanner';
 import CustomerBillModal from './CutomerComponent/CutomerBill';
+import FloatingServiceWidget from './CutomerComponent/FloatingServiceWidget';
 import {
     ShoppingBag,
     Utensils,
@@ -645,6 +646,11 @@ const CustomerDashboard = () => {
                     )}
                 </div>
             </main>
+
+            <FloatingServiceWidget
+                tableId={tableId}
+                tableNumber={tableId}
+            />
 
             {/* 8. FLOATING BOTTOM CART BUTTON */}
             {cart.length > 0 && (
