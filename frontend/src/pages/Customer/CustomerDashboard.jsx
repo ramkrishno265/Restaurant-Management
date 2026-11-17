@@ -7,6 +7,9 @@ import CustomerMenuBar from '../../components/CustomerMenuBar';
 import OrderTrackerBanner from './CutomerComponent/OrderTrackerBanner';
 import CustomerBillModal from './CutomerComponent/CutomerBill';
 import FloatingServiceWidget from './CutomerComponent/FloatingServiceWidget';
+import AIAssistantBanner from './ai-order/AIAssistantBanner';
+
+
 import {
     ShoppingBag,
     Utensils,
@@ -530,7 +533,12 @@ const CustomerDashboard = () => {
                     cancellingId={cancellingId}
                 />
 
+                {/* 6. AI ASSISTANT BANNER */}
+                <AIAssistantBanner />
+
                 {/* 6. SEARCH & CATEGORY FILTER */}
+
+
                 <div className="space-y-3">
                     <div className="relative">
                         <Search size={16} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
