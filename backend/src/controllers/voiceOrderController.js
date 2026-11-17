@@ -1,6 +1,5 @@
 const { GoogleGenAI } = require('@google/genai');
 
-// জেমিনি ক্লাইন্ট ইনিশিয়ালাইজ করা
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // রেস্টুরেন্টের মেনু
@@ -13,7 +12,6 @@ const restaurantMenu = [
 
 exports.handleVoiceOrder = async (req, res) => {
   try {
-    // ফ্রন্টএন্ড থেকে যদি সরাসরি টেক্সট পাঠানো হয় (ব্রাউজারের Web Speech API ব্যবহারের পর)
     const { userText } = req.body;
 
     if (!userText) {
@@ -25,7 +23,8 @@ exports.handleVoiceOrder = async (req, res) => {
       Current Menu: ${JSON.stringify(restaurantMenu)}.
       Respond in polite, natural Bengali. 
       If the customer orders items from the menu, confirm the items and calculate total price.
-      Always return a valid JSON response in this exact format (no extra text, only JSON):
+      YOU MUST RETURN ONLY A VALID JSON OBJECT, NO OTHER TEXT, NO MARKDOWN.
+      Format:
       {
         "replyText": "Your spoken response in Bengali",
         "orderItems": [{ "id": 1, "name": "Item Name", "quantity": 1 }],
@@ -33,7 +32,7 @@ exports.handleVoiceOrder = async (req, res) => {
       }
     `;
 
-    // জেমিনি মডেল কল করা (gemini-2.5-flash ব্যবহার করা সবচেয়ে দ্রুত এবং সেরা)
+    // জেমিনি মডেল কল করা (gemini-1.5-flash অথবা gemini-2.5-flash ব্যবহার করতে পারেন)
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
@@ -41,23 +40,39 @@ exports.handleVoiceOrder = async (req, res) => {
       ]
     });
 
-    let rawResponseText = response.text;
+    let rawResponseText = response.text || "";
     
-    // অনেক সময় জেমিনি মার্কডাউন কোড ব্লক (```json ... ```) সহ রিটার্ন করে, সেটি পরিষ্কার করার জন্য:
+    // ক্লিন করার জন্য কোড ব্লক বা অতিরিক্ত টেক্সট রিমোভ করা
     rawResponseText = rawResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
-
-    const aiResponse = JSON.parse(rawResponseText);
+    
+    // সেফটি চেক: যদি জেমিনি প্রপার JSON না দেয়, তবে সেটির জন্য ফলব্যাক রেসপন্স তৈরি করা
+    let aiResponse;
+    try {
+      aiResponse = JSON.parse(rawResponseText);
+    } catch (parseError) {
+      console.warn("JSON Parse Failed, using raw text as reply:", rawResponseText);
+      aiResponse = {
+        replyText: rawResponseText || "আপনার কথাটি বুঝতে পেরেছি। দয়া করে একটু পরিষ্কার করে বলুন কী অর্ডার করতে চান।",
+        orderItems: [],
+        isOrderConfirmed: false
+      };
+    }
 
     res.status(200).json({
       success: true,
       userSaid: userText,
-      replyText: aiResponse.replyText,
-      orderItems: aiResponse.orderItems,
-      isOrderConfirmed: aiResponse.isOrderConfirmed
+      replyText: aiResponse.replyText || "আপনার অর্ডারটি গ্রহণ করা হয়েছে।",
+      orderItems: aiResponse.orderItems || [],
+      isOrderConfirmed: aiResponse.isOrderConfirmed || false
     });
 
   } catch (error) {
-    console.error("Gemini AI Order Error:", error);
-    res.status(500).json({ error: "এআই প্রসেস করতে গিয়ে সমস্যা হয়েছে।" });
+    // এখানে ডিটيلস এরর কনসোলে প্রিন্ট হবে, যা টার্মিনালে দেখতে পাবেন
+    console.error("Gemini AI Order Error Details:", error.response?.data || error.message || error);
+    
+    res.status(500).json({ 
+      error: "এআই প্রসেস করতে গিয়ে সমস্যা হয়েছে।",
+      replyText: "দুঃখিত, এই মুহূর্তে সার্ভারে একটু সমস্যা হচ্ছে। একটু পরে আবার চেষ্টা করুন।"
+    });
   }
 };
