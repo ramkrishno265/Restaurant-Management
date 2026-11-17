@@ -14,6 +14,9 @@ exports.handleVoiceOrder = async (req, res) => {
   try {
     const { userText } = req.body;
 
+    // 🔍 কনসোলে কাস্টমারের টেক্সট দেখার জন্য
+    console.log("🎙️ Customer Voice Text Received from Frontend:", userText);
+
     if (!userText) {
       return res.status(400).json({ error: 'কোনো মেসেজ পাওয়া যায়নি।' });
     }
@@ -32,7 +35,6 @@ exports.handleVoiceOrder = async (req, res) => {
       }
     `;
 
-    // জেমিনি মডেল কল করা (gemini-1.5-flash অথবা gemini-2.5-flash ব্যবহার করতে পারেন)
     const response = await ai.models.generateContent({
       model: 'gemini-2.5-flash',
       contents: [
@@ -41,22 +43,21 @@ exports.handleVoiceOrder = async (req, res) => {
     });
 
     let rawResponseText = response.text || "";
-    
-    // ক্লিন করার জন্য কোড ব্লক বা অতিরিক্ত টেক্সট রিমোভ করা
     rawResponseText = rawResponseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    
-    // সেফটি চেক: যদি জেমিনি প্রপার JSON না দেয়, তবে সেটির জন্য ফলব্যাক রেসপন্স তৈরি করা
+
     let aiResponse;
     try {
       aiResponse = JSON.parse(rawResponseText);
     } catch (parseError) {
-      console.warn("JSON Parse Failed, using raw text as reply:", rawResponseText);
       aiResponse = {
-        replyText: rawResponseText || "আপনার কথাটি বুঝতে পেরেছি। দয়া করে একটু পরিষ্কার করে বলুন কী অর্ডার করতে চান।",
+        replyText: rawResponseText || "আপনার কথাটি বুঝতে পেরেছি। বলুন কী অর্ডার করতে চান।",
         orderItems: [],
         isOrderConfirmed: false
       };
     }
+
+    // 🔍 এআই কী উত্তর দিচ্ছে সেটিও কনসোলে দেখতে চাইলে
+    console.log("🤖 AI Response Text:", aiResponse.replyText);
 
     res.status(200).json({
       success: true,
@@ -67,9 +68,7 @@ exports.handleVoiceOrder = async (req, res) => {
     });
 
   } catch (error) {
-    // এখানে ডিটيلস এরর কনসোলে প্রিন্ট হবে, যা টার্মিনালে দেখতে পাবেন
-    console.error("Gemini AI Order Error Details:", error.response?.data || error.message || error);
-    
+    console.error("Gemini AI Order Error Details:", error.message || error);
     res.status(500).json({ 
       error: "এআই প্রসেস করতে গিয়ে সমস্যা হয়েছে।",
       replyText: "দুঃখিত, এই মুহূর্তে সার্ভারে একটু সমস্যা হচ্ছে। একটু পরে আবার চেষ্টা করুন।"
