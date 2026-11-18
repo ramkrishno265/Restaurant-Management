@@ -17,6 +17,9 @@ exports.getMenu = async (req, res) => {
       include: {
         menuItems: {
           orderBy: { id: 'desc' },
+          include: {
+            category: true // 👈 এই লাইনটি যুক্ত করলে প্রতিটি আইটেমের ভেতর ক্যাটাগরির নাম থাকবে
+          }
         },
       },
     });
