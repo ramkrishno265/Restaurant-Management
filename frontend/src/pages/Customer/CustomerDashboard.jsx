@@ -313,6 +313,33 @@ const CustomerDashboard = () => {
         });
     };
 
+    const addToCartFromAI = (item) => {
+        const qty = item.quantity || 1;
+        setCart((prevCart) => {
+            const existing = prevCart.find((i) => String(i.id) === String(item.id));
+            if (existing) {
+                return prevCart.map((i) =>
+                    String(i.id) === String(item.id)
+                        ? { ...i, quantity: i.quantity + qty }
+                        : i
+                );
+            }
+            return [
+                ...prevCart,
+                {
+                    id: item.id,
+                    name: item.name,
+                    price: item.price,
+                    imageUrl: item.imageUrl,
+                    quantity: qty,
+                },
+            ];
+        });
+    };
+
+
+
+
     const getItemQuantity = (itemId) => {
         const item = cart.find((i) => i.id === itemId);
         return item ? item.quantity : 0;
@@ -534,7 +561,7 @@ const CustomerDashboard = () => {
                 />
 
                 {/* 6. AI ASSISTANT BANNER */}
-                <AIAssistantBanner />
+                <AIAssistantBanner onAddToCart={addToCartFromAI} />
 
                 {/* 6. SEARCH & CATEGORY FILTER */}
 
